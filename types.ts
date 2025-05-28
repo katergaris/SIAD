@@ -76,29 +76,8 @@ export interface TrainingAssignment {
   score: number | null;
 }
 
-export interface EmployeeCSVRow {
-  name: string;
-  initialRole: string;
-  initialRoleStartDate: string; 
-}
-
-export interface CourseCSVRow {
-  name: string;
-  description: string;
-  date: string; 
-  durationHours: string; 
-  category: string;
-  status?: TrainingCourseStatus;
-  training_type?: TrainingType;
-  trainer_info?: string;
-  planned_period?: string;
-  gxp_area?: string;
-}
-
-export interface PlanStatusCSVRow {
-    planStatus: PlanStatus; // Questo probabilmente va rimosso o ripensato, lo stato piano è più complesso
-}
-
+// EmployeeCSVRow e CourseCSVRow sono rimosse perché loadDataForSedeYearFromCSV è stato rimosso.
+// Mantieni solo se c'è una specifica altra funzionalità di import CSV per singole entità che le usa.
 
 export type CSVExportType = 'employees' | 'courses' | 'assignments' | 'keyPersonnel' | 'planRecords' | 'auditTrail' | 'allData';
 
@@ -299,7 +278,7 @@ export interface DataContextType {
   downloadAuditLog: () => Promise<void>; 
 
   loadKeyPersonnelFromMasterCSV: (file: File) => Promise<{ success: boolean, message?: string, count?: number }>;
-  loadDataForSedeYearFromCSV: (sedeId: string, year: number, dataType: 'employees' | 'courses' | 'assignments' | 'planStatus', file: File) => Promise<{ success: boolean, message?: string, count?: number }>;
+  // loadDataForSedeYearFromCSV è stato rimosso
   exportDataToCSV: (exportType: CSVExportType, sedeId?: string, year?: number) => Promise<void>;
 
   isSupabaseConfigured: boolean; // Nuovo stato
