@@ -1,0 +1,6 @@
+{
+  "name": "SIAD GxP - Training Platform crypto - database",
+  "description": "Una piattaforma per registrare e gestire le sessioni di formazione aziendali, i dipendenti e generare report. Funziona offline caricando dati da file CSV.",
+  "requestFramePermissions": [],
+  "prompt": ""
+}
