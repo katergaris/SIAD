@@ -57,7 +57,7 @@ const PlanningPage: React.FC = () => {
 
   const openCourseModal = (course?: TrainingCourse) => {
     if (!currentSedeId || !currentYear || !isDataEffectivelyLoaded) {
-        alert("Seleziona sede e anno, e assicurati che i dati siano caricati.");
+        alert("Seleziona sede e anno, e assicurati che i dati siano caricati da Supabase.");
         return;
     }
     if (course) {
@@ -120,7 +120,7 @@ const PlanningPage: React.FC = () => {
 
   const openQPApprovalModal = (course: TrainingCourse) => {
     if (!currentSedeId || !currentYear || !isDataEffectivelyLoaded) {
-        alert("Dati sede/anno non caricati."); return;
+        alert("Dati sede/anno non caricati da Supabase."); return;
     }
     setCourseToApproveByQP(course);
     setIsQPModalOpen(true);
@@ -267,7 +267,7 @@ const PlanningPage: React.FC = () => {
 
 
   if (!currentSedeId || !currentYear) { return <div className="text-center p-8 bg-white rounded-lg shadow-md"><p className="text-xl text-gray-600">Seleziona Sede e Anno dalla barra di navigazione.</p></div>; }
-  if (!isDataEffectivelyLoaded && currentSedeId && currentYear) { return <div className="text-center p-8 bg-white rounded-lg shadow-md"><p className="text-xl text-yellow-700">Dati per {currentSedeName || currentSedeId}/{currentYear} non caricati. Controlla la connessione o vai su Admin &gt; Import/Export CSV.</p></div>; }
+  if (!isDataEffectivelyLoaded && currentSedeId && currentYear) { return <div className="text-center p-8 bg-white rounded-lg shadow-md"><p className="text-xl text-yellow-700">Dati per {currentSedeName || currentSedeId}/{currentYear} non caricati. Controlla la connessione e assicurati che i dati siano presenti in Supabase.</p></div>; }
 
   return (
     <div className="space-y-6">
