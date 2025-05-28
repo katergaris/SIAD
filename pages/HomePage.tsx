@@ -112,7 +112,7 @@ const HomePage: React.FC = () => {
               <li>Carica il file globale <code>utenti_chiave.csv</code> (se non già fatto).</li>
               <li>Per la Sede/Anno scelti, carica i 4 file CSV: <code>[SEDE]_[ANNO]_dipendenti.csv</code>, <code>[SEDE]_[ANNO]_corsi.csv</code>, <code>[SEDE]_[ANNO]_assegnazioni.csv</code>, e <code>[SEDE]_[ANNO]_stato_piano.csv</code>.</li>
               <li>Una volta caricati i dati, puoi navigare nelle altre sezioni.</li>
-              <li><strong>Importante:** Ogni modifica ai dati attiverà un **download automatico** del file CSV pertinente. **Devi salvare questo file, sovrascrivendo quello esistente nella tua cartella condivisa, per rendere la modifica persistente.**</li>
+              <li><strong>Importante:** Ogni modifica ai dati attiverà un **download automatico** del file CSV pertinente. **Devi salvare questo file, sovrascrivendo quello esistente nella tua cartella condivisa, per rendere la modifica persistente.**</strong></li>
             </ol>
           </div>
         </div>
