@@ -1,4 +1,3 @@
-
 import path from 'path';
 import { fileURLToPath } from 'url'; // Added import
 import { defineConfig, loadEnv } from 'vite';
