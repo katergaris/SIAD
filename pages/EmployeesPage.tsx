@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from 'react';
 import { useData } from '../contexts/DataContext';
 import { Employee } from '../types';
@@ -11,7 +10,7 @@ const EmployeesPage: React.FC = () => {
     currentSedeId, currentYear, yearlySedeData, sedi
   } = useData();
   
-  const employees = getSedeEmployees(); // Gets employees for currentSedeId & currentYear
+  const employees = getSedeEmployees(); 
 
   const currentSedeObject = useMemo(() => sedi.find(s => s.id === currentSedeId), [sedi, currentSedeId]);
   const currentSedeName = currentSedeObject?.name;
@@ -48,8 +47,8 @@ const EmployeesPage: React.FC = () => {
     if (newEmployeeData.name && newEmployeeData.initialRole && newEmployeeData.initialRoleStartDate) {
       await addEmployee({
         name: newEmployeeData.name,
-        currentRole: newEmployeeData.initialRole, // currentRole is set to initialRole for new employee
-        initialRole: newEmployeeData.initialRole, // initialRole field for specific logic if needed
+        currentRole: newEmployeeData.initialRole, 
+        initialRole: newEmployeeData.initialRole, 
         initialRoleStartDate: newEmployeeData.initialRoleStartDate,
       });
       setIsEmployeeModalOpen(false);
@@ -74,7 +73,6 @@ const EmployeesPage: React.FC = () => {
       const {success} = await updateEmployeeRole(selectedEmployee.id, newRoleData.role, newRoleData.startDate);
       if(success){
         setIsRoleModalOpen(false);
-        // Data will be re-fetched by DataContext, no need to manually update selectedEmployee state here if list re-renders
       }
     } else {
       alert("Per favore, compila tutti i campi per il cambio ruolo.");
@@ -85,7 +83,7 @@ const EmployeesPage: React.FC = () => {
     return <div className="text-center p-8 bg-white rounded-lg shadow-md"><p className="text-xl text-gray-600">Seleziona Sede e Anno dalla barra di navigazione.</p></div>;
   }
    if (!isDataEffectivelyLoaded && currentSedeId && currentYear) {
-    return <div className="text-center p-8 bg-white rounded-lg shadow-md"><p className="text-xl text-yellow-700">Dati per {currentSedeName || currentSedeId}/{currentYear} non caricati. Controlla la connessione o vai su Admin &gt; Import/Export CSV.</p></div>;
+    return <div className="text-center p-8 bg-white rounded-lg shadow-md"><p className="text-xl text-yellow-700">Dati per {currentSedeName || currentSedeId}/{currentYear} non caricati. Controlla la connessione o gestisci i dati tramite le pagine dedicate.</p></div>;
   }
 
   return (
@@ -93,8 +91,7 @@ const EmployeesPage: React.FC = () => {
       <div className="bg-white p-6 rounded-lg shadow-md">
         <h1 className="text-3xl font-bold text-gray-800 mb-2">Gestione Dipendenti - {currentSedeName || currentSedeId} / {currentYear}</h1>
         <p className="text-xs text-gray-500 mt-1">
-          Per importare dipendenti in blocco, vai su Admin &gt; Import/Export CSV (per sede/anno correnti). <br/>
-          Le modifiche sono salvate direttamente nel database Supabase.
+          Aggiungi o modifica dipendenti. Le modifiche sono salvate direttamente nel database Supabase.
         </p>
       </div>
 
@@ -169,15 +166,15 @@ const EmployeesPage: React.FC = () => {
           <form onSubmit={handleAddEmployee} className="space-y-4">
             <div>
               <label htmlFor="name" className="block text-sm font-medium text-gray-700">Nome Completo</label>
-              <input type="text" name="name" id="name" value={newEmployeeData.name} onChange={(e) => setNewEmployeeData({...newEmployeeData, name: e.target.value})} required className="mt-1 block w-full px-3 py-2 border border-gray-400 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm" />
+              <input type="text" name="name" id="name" value={newEmployeeData.name} onChange={(e) => setNewEmployeeData({...newEmployeeData, name: e.target.value})} required className="mt-1 block w-full px-3 py-2 border border-gray-400 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm bg-white text-gray-900" />
             </div>
             <div>
               <label htmlFor="initialRole" className="block text-sm font-medium text-gray-700">Ruolo Iniziale</label>
-              <input type="text" name="initialRole" id="initialRole" value={newEmployeeData.initialRole} onChange={(e) => setNewEmployeeData({...newEmployeeData, initialRole: e.target.value})} required className="mt-1 block w-full px-3 py-2 border border-gray-400 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm" />
+              <input type="text" name="initialRole" id="initialRole" value={newEmployeeData.initialRole} onChange={(e) => setNewEmployeeData({...newEmployeeData, initialRole: e.target.value})} required className="mt-1 block w-full px-3 py-2 border border-gray-400 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm bg-white text-gray-900" />
             </div>
             <div>
               <label htmlFor="initialRoleStartDate" className="block text-sm font-medium text-gray-700">Data Inizio Ruolo (YYYY-MM-DD)</label>
-              <input type="date" name="initialRoleStartDate" id="initialRoleStartDate" value={newEmployeeData.initialRoleStartDate} onChange={(e) => setNewEmployeeData({...newEmployeeData, initialRoleStartDate: e.target.value})} required className="mt-1 block w-full px-3 py-2 border border-gray-400 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm" />
+              <input type="date" name="initialRoleStartDate" id="initialRoleStartDate" value={newEmployeeData.initialRoleStartDate} onChange={(e) => setNewEmployeeData({...newEmployeeData, initialRoleStartDate: e.target.value})} required className="mt-1 block w-full px-3 py-2 border border-gray-400 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm bg-white text-gray-900" />
             </div>
             <div className="flex justify-end space-x-3 pt-4">
                 <button type="button" onClick={() => { setIsEmployeeModalOpen(false); setSelectedEmployee(null);}} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md border border-gray-300">Annulla</button>
@@ -192,11 +189,11 @@ const EmployeesPage: React.FC = () => {
           <form onSubmit={handleAddRoleChange} className="space-y-4">
             <div>
               <label htmlFor="newRole" className="block text-sm font-medium text-gray-700">Nuovo Ruolo</label>
-              <input type="text" name="newRole" id="newRole" value={newRoleData.role} onChange={(e) => setNewRoleData({...newRoleData, role: e.target.value})} required className="mt-1 block w-full px-3 py-2 border border-gray-400 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm" />
+              <input type="text" name="newRole" id="newRole" value={newRoleData.role} onChange={(e) => setNewRoleData({...newRoleData, role: e.target.value})} required className="mt-1 block w-full px-3 py-2 border border-gray-400 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm bg-white text-gray-900" />
             </div>
             <div>
               <label htmlFor="startDate" className="block text-sm font-medium text-gray-700">Data Inizio Nuovo Ruolo (YYYY-MM-DD)</label>
-              <input type="date" name="startDate" id="startDate" value={newRoleData.startDate} onChange={(e) => setNewRoleData({...newRoleData, startDate: e.target.value})} required className="mt-1 block w-full px-3 py-2 border border-gray-400 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm" />
+              <input type="date" name="startDate" id="startDate" value={newRoleData.startDate} onChange={(e) => setNewRoleData({...newRoleData, startDate: e.target.value})} required className="mt-1 block w-full px-3 py-2 border border-gray-400 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm bg-white text-gray-900" />
             </div>
              <div className="flex justify-end space-x-3 pt-4">
                 <button type="button" onClick={() => { setIsRoleModalOpen(false); setSelectedEmployee(null);}} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md border border-gray-300">Annulla</button>

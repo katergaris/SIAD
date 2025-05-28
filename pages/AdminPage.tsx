@@ -10,10 +10,10 @@ type AdminSection = 'sedi' | 'personale' | 'dataManagement' | 'audit' | 'guides'
 const AdminPage: React.FC = () => {
   const { 
     sedi, addSede, removeSede, 
-    currentSedeId, setCurrentSedeId,
-    currentYear, availableYears, 
+    currentSedeId, 
+    currentYear, 
     keyPersonnelList, addKeyPersonnel, updateKeyPersonnel, removeKeyPersonnel,
-    loadKeyPersonnelFromMasterCSV, loadDataForSedeYearFromCSV,
+    loadKeyPersonnelFromMasterCSV, 
     downloadAuditLog, exportDataToCSV: triggerExport 
   } = useData();
   const [activeSection, setActiveSection] = useState<AdminSection>('dataManagement');
@@ -24,13 +24,8 @@ const AdminPage: React.FC = () => {
   const [isPersonnelModalOpen, setIsPersonnelModalOpen] = useState(false);
   const [editingPersonnel, setEditingPersonnel] = useState<KeyPersonnel | null>(null);
   const [personnelFormData, setPersonnelFormData] = useState<Omit<NewKeyPersonnelPayload, 'passwordPlain'> & {passwordPlain?: string, confirmPassword?: string, id?: string, auth_user_id?: string}>({
-    name: '', email: '', role: KeyPersonnelRole.QA_SITO, passwordPlain: '', confirmPassword: '' // Default role
+    name: '', email: '', role: KeyPersonnelRole.QA_SITO, passwordPlain: '', confirmPassword: '' 
   });
-
-  const [sedeDataFileEmployees, setSedeDataFileEmployees] = useState<File | null>(null);
-  const [sedeDataFileCourses, setSedeDataFileCourses] = useState<File | null>(null);
-  const [sedeDataFileAssignments, setSedeDataFileAssignments] = useState<File | null>(null);
-  const [sedeDataFilePlanStatus, setSedeDataFilePlanStatus] = useState<File | null>(null); // Ora 'planRecords'
   
   const [selectedSedeForDataLoad, setSelectedSedeForDataLoad] = useState<string | null>(currentSedeId);
   const [selectedYearForDataLoad, setSelectedYearForDataLoad] = useState<number | null>(currentYear);
@@ -96,42 +91,6 @@ const AdminPage: React.FC = () => {
     }
     if (setIsPersonnelModalOpen) setIsPersonnelModalOpen(false); 
   };
-
-  const handleLoadSedeDataAll = async () => {
-    if (!selectedSedeForDataLoad || !selectedYearForDataLoad) {
-        alert("Seleziona una sede e un anno."); return;
-    }
-    if (!sedeDataFileEmployees && !sedeDataFileCourses && !sedeDataFileAssignments) { // PlanStatus is optional
-        alert("Seleziona almeno i file CSV per Dipendenti, Corsi e Assegnazioni."); return;
-    }
-    try {
-        const yearNum = selectedYearForDataLoad;
-        let message = "";
-
-        if (sedeDataFileEmployees) {
-            const res = await loadDataForSedeYearFromCSV(selectedSedeForDataLoad, yearNum, 'employees', sedeDataFileEmployees);
-            message += `Dipendenti: ${res.message}\n`;
-        }
-        if (sedeDataFileCourses) {
-            const res = await loadDataForSedeYearFromCSV(selectedSedeForDataLoad, yearNum, 'courses', sedeDataFileCourses);
-            message += `Corsi: ${res.message}\n`;
-        }
-        if (sedeDataFileAssignments) {
-            const res = await loadDataForSedeYearFromCSV(selectedSedeForDataLoad, yearNum, 'assignments', sedeDataFileAssignments);
-            message += `Assegnazioni: ${res.message}\n`;
-        }
-        if (sedeDataFilePlanStatus) { 
-            // @ts-ignore 'planStatus' is a valid string literal for dataType, but TS might complain if 'planRecords' is expected elsewhere
-            const res = await loadDataForSedeYearFromCSV(selectedSedeForDataLoad, yearNum, 'planStatus', sedeDataFilePlanStatus);
-             message += `Stato Piano (planRecords): ${res.message}\n`;
-        }
-        alert(`Risultati caricamento:\n${message}`);
-        setSedeDataFileEmployees(null); setSedeDataFileCourses(null);
-        setSedeDataFileAssignments(null); setSedeDataFilePlanStatus(null);
-    } catch (error) {
-        alert(`Errore caricamento dati: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  };
   
   const handleTechGuidePasswordSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -169,7 +128,7 @@ const AdminPage: React.FC = () => {
     <div className="space-y-8">
       <header className="bg-gradient-to-r from-primary to-dark text-white p-8 rounded-lg shadow-xl">
         <h1 className="text-4xl font-bold mb-2">Pannello Amministrazione</h1>
-        <p className="text-lg">Gestisci nomi sedi, personale chiave GxP, caricamento dati e audit. I dati sono ora su database Supabase.</p>
+        <p className="text-lg">Gestisci nomi sedi, personale chiave GxP, import/export e audit. I dati sono ora su database Supabase.</p>
       </header>
 
       <nav className="flex space-x-2 sm:space-x-4 border-b-2 border-gray-200 pb-4 mb-6 flex-wrap">
@@ -190,18 +149,19 @@ const AdminPage: React.FC = () => {
               <li><strong>Utenti Chiave GxP (Admin):</strong>
                 <ul className="list-disc list-inside pl-5 mt-1">
                     <li>Aggiungi utenti chiave (Admin, QA_SITO, QP, QA_CENTRALE) tramite "Personale Chiave GxP". Questo creerà un account in Supabase Authentication e un profilo `key_personnel`.</li>
-                    <li>Importazione CSV: richiede `name`, `role` (valido da enum GxP), `email`, `passwordPlain`.</li>
+                    <li>Importazione CSV: per il personale chiave, usa la sezione "Import/Export CSV". Richiede `name`, `role` (valido da enum GxP), `email`, `passwordPlain`.</li>
                 </ul>
               </li>
               <li><strong>Nomi Sedi (Admin):</strong> Aggiungi nomi sedi da "Gestione Nomi Sedi".</li>
               <li><strong>Dati per Sede/Anno (Admin o Utenti Autorizzati GxP):</strong>
                 <ul className="list-disc list-inside pl-5 mt-1">
                   <li>Seleziona Sede/Anno.</li>
-                  <li>Utilizza "Import/Export CSV" per caricare file CSV per Dipendenti, Corsi (inclusi nuovi campi GxP), Assegnazioni e Piani.</li>
+                  <li>Dipendenti, Corsi, Assegnazioni e Piani vengono gestiti direttamente nelle rispettive pagine ("Pianificazione", "Dipendenti", "Assegnazioni"). Le modifiche sono salvate su Supabase.</li>
+                  <li>L'import CSV per popolare queste entità può essere usato per configurazioni iniziali o import massivi se necessario (usando l'opzione "Importa Dati Sede per Anno" se disponibile e ancora supportata, altrimenti l'aggiunta manuale è il metodo principale).</li>
                 </ul>
               </li>
-              <li><strong>Salvataggio Modifiche:</strong> Le modifiche (es. aggiungere un corso, approvare un piano GxP) sono salvate direttamente su Supabase.</li>
-              <li><strong>Export CSV (Backup/Analisi):</strong> Esporta dati da Supabase.</li>
+              <li><strong>Salvataggio Modifiche:</strong> Le modifiche sono salvate direttamente su Supabase.</li>
+              <li><strong>Export CSV (Backup/Analisi):</strong> Esporta dati da Supabase tramite la sezione "Import/Export CSV".</li>
                <li><strong>Sicurezza (Supabase):</strong> Gestita da Supabase Authentication e Row Level Security (RLS) policies. Assicurati che le RLS siano configurate correttamente per i ruoli GxP.</li>
             </ol>
           </div>
@@ -236,10 +196,10 @@ const AdminPage: React.FC = () => {
                         <li><strong>Selezione Sede e Anno.</strong></li>
                         <li><strong>Gestione Dati (in base al ruolo):</strong>
                             <ul>
-                                <li><strong>QA_SITO:</strong> Definisce fabbisogni, predispone piano annuale, aggiorna schede partecipanti, report esterni, integra formazione speciale.</li>
+                                <li><strong>QA_SITO:</strong> Definisce fabbisogni, predispone piano annuale, aggiorna schede partecipanti, report esterni, integra formazione speciale. Gestisce corsi, dipendenti, assegnazioni per la sua sede/anno.</li>
                                 <li><strong>QP:</strong> Approva/Rigetta il piano formativo di sito. Approva/Rigetta modifiche al piano. Approva i singoli corsi.</li>
                                 <li><strong>QA_CENTRALE:</strong> Approva/Rigetta il piano formativo di sito (dopo QP).</li>
-                                <li><strong>Admin:</strong> Gestione utenti, sedi, import/export, override (con audit).</li>
+                                <li><strong>Admin:</strong> Gestione utenti, sedi, export, override (con audit).</li>
                             </ul>
                         </li>
                         <li><strong>Salvataggio Modifiche:</strong> Automatico su Supabase.</li>
@@ -248,7 +208,6 @@ const AdminPage: React.FC = () => {
             )}
             {activeGuideSubSection === 'technical' && (
                  <div className="prose max-w-none p-4 border rounded-md bg-purple-50 border-purple-200">
-                     {/* Contenuto Guida Tecnica come prima, ma enfatizzare RLS per ruoli GxP */}
                      <h3 className="text-xl font-semibold text-purple-700">Guida Tecnica (Supabase & GxP)</h3>
                     {!techGuidePasswordVerified && (
                         <div className="my-4 p-3 bg-red-100 border border-red-300 rounded-md text-red-700">
@@ -266,7 +225,6 @@ const AdminPage: React.FC = () => {
                         <li>Schema SQL aggiornato per campi GxP nei corsi, stati piano GxP, e approvazioni dettagliate.</li>
                         <li>**Row Level Security (RLS) è CRUCIALE.** Implementare RLS granulari basate su `auth.uid()` e `get_user_role()` per i nuovi ruoli GxP.</li>
                     </ul>
-                     {/* ... resto della guida tecnica ... */}
                  </div>
             )}
         </section>
@@ -297,44 +255,39 @@ const AdminPage: React.FC = () => {
                     acceptedFileType=".csv" 
                 />
             </div>
+            
+            {/* Sezione Importa Dati Sede per Anno (CSV) è stata rimossa. */}
+            {/* La gestione di dipendenti, corsi, assegnazioni, e piani avviene ora */}
+            {/* direttamente nelle rispettive pagine (Pianificazione, Dipendenti, Assegnazioni). */}
+            {/* L'import CSV per queste entità potrebbe essere reintrodotto con una logica più specifica */}
+            {/* se necessario per bulk operations, ma non è più il metodo primario. */}
+            <div className="p-4 border rounded-md bg-gray-100 border-gray-300">
+                 <h3 className="text-xl font-semibold text-gray-700 mb-2">Importazione Dati Operativi (Dipendenti, Corsi, ecc.)</h3>
+                 <p className="text-sm text-gray-600 mb-3">
+                    La gestione dei dipendenti, corsi, assegnazioni e piani formativi avviene ora direttamente attraverso le rispettive sezioni dell'applicazione (Pianificazione, Dipendenti, Assegnazioni).
+                    Queste modifiche vengono salvate direttamente nel database Supabase. L'importazione CSV per queste entità non è più il metodo primario per l'inserimento dati.
+                 </p>
+                 <p className="text-sm text-gray-600">
+                    Per esportare dati per backup o analisi, utilizza le opzioni di seguito.
+                 </p>
+            </div>
 
-            <div className="p-4 border rounded-md bg-green-50 border-green-200">
-                <h3 className="text-xl font-semibold text-green-700 mb-2">Importa Dati Sede per Anno (CSV)</h3>
-                 <div className="grid md:grid-cols-2 gap-4 mb-4">
+
+            <div className="p-4 border rounded-md bg-purple-50 border-purple-200">
+                <h3 className="text-xl font-semibold text-purple-700 mb-2">Esporta Dati (CSV)</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                     <div>
-                        <label htmlFor="adminSedeSelectData" className="block text-sm font-medium text-gray-700 mb-1">Sede:</label>
-                        <select id="adminSedeSelectData" value={selectedSedeForDataLoad || ''} onChange={(e) => setSelectedSedeForDataLoad(e.target.value || null)} className="input-field bg-white">
+                        <label htmlFor="adminSedeSelectExport" className="block text-sm font-medium text-gray-700 mb-1">Sede (per export specifici):</label>
+                        <select id="adminSedeSelectExport" value={selectedSedeForDataLoad || ''} onChange={(e) => setSelectedSedeForDataLoad(e.target.value || null)} className="input-field bg-white">
                             <option value="" disabled>-- Seleziona Sede --</option>
                             {sedi.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                         </select>
                     </div>
                     <div>
-                        <label htmlFor="adminYearSelectData" className="block text-sm font-medium text-gray-700 mb-1">Anno:</label>
-                         <input type="number" id="adminYearSelectData" placeholder="Es. 2024" value={selectedYearForDataLoad || ''} onChange={(e) => setSelectedYearForDataLoad(e.target.value ? parseInt(e.target.value) : null)} className="input-field" />
+                        <label htmlFor="adminYearSelectExport" className="block text-sm font-medium text-gray-700 mb-1">Anno (per export specifici):</label>
+                         <input type="number" id="adminYearSelectExport" placeholder="Es. 2024" value={selectedYearForDataLoad || ''} onChange={(e) => setSelectedYearForDataLoad(e.target.value ? parseInt(e.target.value) : null)} className="input-field" />
                     </div>
                 </div>
-
-                {selectedSedeForDataLoad && selectedYearForDataLoad && (
-                    <>
-                        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
-                            <FileUpload onFileUpload={(file) => setSedeDataFileEmployees(file)} label={`Dipendenti`} acceptedFileType=".csv"/>
-                            <FileUpload onFileUpload={(file) => setSedeDataFileCourses(file)} label={`Corsi (GxP)`} acceptedFileType=".csv"/>
-                            <FileUpload onFileUpload={(file) => setSedeDataFileAssignments(file)} label={`Assegnazioni`} acceptedFileType=".csv"/>
-                            <FileUpload onFileUpload={(file) => setSedeDataFilePlanStatus(file)} label={`Piani Sede`} acceptedFileType=".csv"/>
-                        </div>
-                        <button 
-                            onClick={handleLoadSedeDataAll}
-                            disabled={!sedeDataFileEmployees && !sedeDataFileCourses && !sedeDataFileAssignments && !sedeDataFilePlanStatus} 
-                            className="mt-4 btn-primary bg-success hover:bg-green-700 disabled:bg-gray-400"
-                        >
-                            <FaUpload className="mr-2"/> Carica Dati CSV Selezionati
-                        </button>
-                    </>
-                )}
-            </div>
-
-            <div className="p-4 border rounded-md bg-purple-50 border-purple-200">
-                <h3 className="text-xl font-semibold text-purple-700 mb-2">Esporta Dati (CSV)</h3>
                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                     {(['employees', 'courses', 'assignments', 'planRecords', 'keyPersonnel', 'auditTrail'] as CSVExportType[]).map(type => (
                         (type !== 'allData') && 

@@ -1,4 +1,3 @@
-
 import React, { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { FaCalendarAlt, FaUsers, FaTasks, FaChartBar, FaInfoCircle, FaEraser, FaDatabase, FaExclamationTriangle, FaCloudUploadAlt, FaWrench } from 'react-icons/fa';
@@ -9,7 +8,7 @@ const HomePage: React.FC = () => {
     getSedeEmployees, getSedeCourses, getSedeAssignments, 
     clearCurrentSedeYearData, 
     currentSedeId, currentYear, yearlySedeData, sedi,
-    isSupabaseConfigured // Nuovo stato per la configurazione di Supabase
+    isSupabaseConfigured 
   } = useData();
 
   const employees = getSedeEmployees();
@@ -27,8 +26,8 @@ const HomePage: React.FC = () => {
 
 
   const cardStyle = "bg-white p-6 rounded-xl shadow-lg hover:shadow-2xl transition-shadow duration-300 ease-in-out transform hover:-translate-y-1";
-  const linkStyle = "flex flex-col items-center justify-center text-center text-primary hover:text-green-700"; // Use primary color
-  const iconStyle = "text-4xl mb-3 text-primary"; // Use primary color
+  const linkStyle = "flex flex-col items-center justify-center text-center text-primary hover:text-green-700"; 
+  const iconStyle = "text-4xl mb-3 text-primary"; 
 
   if (!isSupabaseConfigured) {
     return (
@@ -74,7 +73,7 @@ GEMINI_API_KEY=LA_TUA_CHIAVE_GEMINI_SE_USATA`}
                 <div>
                     <h2 className="text-xl font-semibold text-yellow-700">Selezione Incompleta</h2>
                     <p className="text-yellow-600">Per iniziare, seleziona una <strong>Sede</strong> e un <strong>Anno Operativo</strong> dalla barra di navigazione.</p>
-                    <p className="text-sm text-yellow-600 mt-1">Se non hai ancora configurato nomi di sedi, vai al <Link to="/admin" className="font-semibold underline hover:text-yellow-800">Pannello Admin</Link> per aggiungerle. I dati verranno poi caricati da Supabase per la sede e l'anno scelti, o puoi importarli tramite CSV se necessario.</p>
+                    <p className="text-sm text-yellow-600 mt-1">Se non hai ancora configurato nomi di sedi, vai al <Link to="/admin" className="font-semibold underline hover:text-yellow-800">Pannello Admin</Link> per aggiungerle. I dati verranno poi caricati da Supabase per la sede e l'anno scelti.</p>
                 </div>
             </div>
         </section>
@@ -88,7 +87,9 @@ GEMINI_API_KEY=LA_TUA_CHIAVE_GEMINI_SE_USATA`}
                     <h2 className="text-xl font-semibold text-orange-700">Dati Non Caricati per {currentSedeName || currentSedeId} / {currentYear}</h2>
                     <p className="text-orange-600">I dati per la sede "<strong>{currentSedeName || currentSedeId}</strong>" e l'anno "<strong>{currentYear}</strong>" non sembrano essere stati caricati in questa sessione da Supabase.</p>
                     <p className="text-sm text-orange-600 mt-1">
-                        Assicurati di avere una connessione internet. Se è il primo utilizzo o i dati mancano, vai al <Link to="/admin" className="font-semibold underline hover:text-orange-800">Pannello Admin &gt; Import/Export CSV</Link> per caricare i file CSV necessari (Dipendenti, Corsi, Assegnazioni, Stato Piano) per questa combinazione sede/anno.
+                        Assicurati di avere una connessione internet. I dati dovrebbero caricarsi automaticamente. Se i dati mancano completamente nel database per questa sede/anno, 
+                        vai nelle rispettive pagine (Pianificazione, Dipendenti, Assegnazioni) per aggiungerli. 
+                        L'import CSV di massa per queste entità è per casi specifici tramite il <Link to="/admin" className="font-semibold underline hover:text-orange-800">Pannello Admin</Link>.
                     </p>
                 </div>
             </div>
@@ -149,11 +150,10 @@ GEMINI_API_KEY=LA_TUA_CHIAVE_GEMINI_SE_USATA`}
               <li>Seleziona <strong>Sede</strong> e <strong>Anno</strong> dalla barra di navigazione.</li>
               <li>I dati dovrebbero caricarsi automaticamente da Supabase.</li>
               <li><strong>Gestione Dati:</strong> Utilizza le sezioni Pianificazione, Dipendenti, Assegnazioni. Le modifiche sono salvate direttamente su Supabase.</li>
-              <li><strong>Import Iniziale / Massivo (Admin):</strong>
+              <li><strong>Import Personale Chiave (Admin):</strong>
                 <ul className="list-disc list-inside pl-4 mt-1">
                     <li>Vai al <Link to="/admin" className="font-semibold underline hover:text-yellow-800">Pannello Admin</Link> &gt; "Import/Export CSV".</li>
-                    <li>Importa <code>utenti_chiave.csv</code> (se necessario).</li>
-                    <li>Per la Sede/Anno scelti, carica i 4 file CSV (Dipendenti, Corsi, Assegnazioni, Stato Piano) per popolare il database.</li>
+                    <li>Importa <code>utenti_chiave.csv</code> (se necessario per aggiunte massive).</li>
                 </ul>
               </li>
               <li><strong>Export CSV (Admin):</strong> Per backup o analisi esterne, usa la funzione di export nel Pannello Admin.</li>

@@ -5,25 +5,36 @@ import {
     YearlySedeData, SedeSpecificData, BatchAssignmentPayload,
     KeyPersonnel, PlanStatus, CourseApproval, PlanApproval, PlanRecord, DataContextType, CSVExportType,
     AuditEntry, LogAction, KeyPersonnelRole, NewKeyPersonnelPayload, UpdateKeyPersonnelPayload,
-    EmployeeCSVRow, CourseCSVRow, TrainingType // Mantenere per import CSV
+    TrainingType // EmployeeCSVRow, CourseCSVRow rimosse
 } from '../types';
 import { parseCSV } from '../services/csvParser'; 
 import { exportDataToCSV as exportCSVUtil } from '../services/csvExporter'; 
 
 // Utilizza variabili d'ambiente per URL e chiave Anon di Supabase
 // L'utente deve configurarle nel file .env.local
+console.log("[DataContext] Initial process.env.SUPABASE_URL:", process.env.SUPABASE_URL);
+console.log("[DataContext] Initial process.env.SUPABASE_ANON_KEY:", process.env.SUPABASE_ANON_KEY);
+
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
 
 let initialIsSupabaseConfigured = false;
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.error("Supabase URL and Anon Key are required. Check your .env.local file and restart the development server.");
+if (!supabaseUrl || typeof supabaseUrl !== 'string' || supabaseUrl.trim() === '' || 
+    !supabaseAnonKey || typeof supabaseAnonKey !== 'string' || supabaseAnonKey.trim() === '') {
+  console.error("Supabase URL and Anon Key are required, valid strings, and non-empty. Check your .env.local file and restart the development server.");
 } else {
+  console.log("[DataContext] Supabase URL and Anon Key seem to be present.");
   initialIsSupabaseConfigured = true;
 }
 
-export const supabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null as SupabaseClient | null;
+export const supabase = initialIsSupabaseConfigured ? createClient(supabaseUrl!, supabaseAnonKey!) : null as SupabaseClient | null;
+if (initialIsSupabaseConfigured && supabase) {
+    console.log("[DataContext] Supabase client created successfully.");
+} else if (initialIsSupabaseConfigured && !supabase) {
+    console.error("[DataContext] Supabase client creation FAILED despite URL/Key being present. Check Supabase client library or network.");
+}
+
 
 type InferredAuthUser = Session['user'];
 
@@ -51,7 +62,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
 
   useEffect(() => {
-    if (!supabase || !isSupabaseConfigured) return;
+    if (!supabase || !isSupabaseConfigured) {
+        console.log("[DataContext] Supabase not configured, skipping auth listener and initial fetches.");
+        return;
+    }
+    console.log("[DataContext] Setting up onAuthStateChange listener and initial fetches.");
 
     const { data: authSubscriptionContainer, error: authSubscriptionError } = (supabase.auth as any).onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
       const supabaseUser = session?.user || null;
@@ -106,13 +121,13 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return () => {
       subscription?.unsubscribe();
     };
-  }, [isSupabaseConfigured]); // Aggiunto isSupabaseConfigured alle dipendenze
+  }, [isSupabaseConfigured]); 
 
  useEffect(() => {
     if (currentSedeId && currentYear && supabase && isSupabaseConfigured) {
       fetchDataForSedeAndYear(currentSedeId, currentYear);
     }
-  }, [currentSedeId, currentYear, isSupabaseConfigured]); // Aggiunto isSupabaseConfigured
+  }, [currentSedeId, currentYear, isSupabaseConfigured]);
 
 
   const addAuditLogEntry = useCallback(async (action: LogAction, details: string, sedeIdParam?: string | null, yearParam?: number | null) => {
@@ -292,8 +307,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     if (updates.newPasswordPlain) {
-        // Changing other users' passwords requires admin privileges on Supabase, usually via a backend function.
-        // Updating the current user's password can be done client-side.
         if (currentAuthUser?.id === personnelAuthUserIdToUpdate) { 
              const { error: passwordError } = await (supabase.auth as any).updateUser({ password: updates.newPasswordPlain });
              if (passwordError) {
@@ -301,17 +314,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 return { success: false, message: `Password Update Error: ${passwordError.message}` };
             }
         } else if (currentKeyPersonnel?.role === KeyPersonnelRole.ADMIN) { 
-            // This is a client-side operation. Supabase typically restricts this.
-            // For admin to change other user's password, this should be a call to a trusted server-side (Edge) function
-            // that uses the service_role key.
             console.warn("L'admin non può cambiare la password di altri utenti direttamente dal client in questo modo. Richiede una funzione backend con privilegi admin.");
-            // return { success: false, message: "Admin password changes for other users require a backend function." };
         }
     }
     
     addAuditLogEntry(LogAction.UPDATE_KEY_PERSONNEL, `Aggiornato utente chiave (AuthID: ${personnelAuthUserIdToUpdate}). Dati: ${JSON.stringify(updates)}`);
     fetchKeyPersonnelList();
-    // If the updated user is the current user, refresh their profile data
     if (currentAuthUser?.id === personnelAuthUserIdToUpdate) {
         const { data: updatedProfile } = await supabase.from('key_personnel').select('*').eq('auth_user_id', personnelAuthUserIdToUpdate).single();
         if (updatedProfile) {
@@ -319,7 +327,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 id: updatedProfile.id,
                 auth_user_id: updatedProfile.auth_user_id,
                 name: updatedProfile.name,
-                email: currentAuthUser.email, // Email from auth user, not profile table
+                email: currentAuthUser.email,
                 role: updatedProfile.role as KeyPersonnelRole,
             });
             setIsAdminAuthenticated(updatedProfile.role === KeyPersonnelRole.ADMIN);
@@ -333,20 +341,16 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
      if (!currentKeyPersonnel || currentKeyPersonnel.role !== KeyPersonnelRole.ADMIN) {
         return { success: false, message: "Azione non autorizzata." };
     }
-    // Prevent admin from deleting themselves via this UI flow
     if (currentAuthUser?.id === personnelAuthUserIdToRemove) {
         return { success: false, message: "Non puoi rimuovere te stesso." };
     }
 
-    // Deleting the profile from 'key_personnel' table
     const kpToRemove = keyPersonnelList.find(kp => kp.auth_user_id === personnelAuthUserIdToRemove);
     const { error: profileError } = await supabase.from('key_personnel').delete().eq('auth_user_id', personnelAuthUserIdToRemove);
     if (profileError) {
       console.error('Error deleting key personnel profile:', profileError.message || JSON.stringify(profileError));
       return { success: false, message: `Profile Deletion Error: ${profileError.message}` };
     }
-    // Deleting from auth.users requires admin privileges (service_role key) and should be done via a backend function.
-    // Inform the admin about this limitation.
     console.warn(`User profile for ${kpToRemove?.name || personnelAuthUserIdToRemove} deleted. Actual Supabase Auth user deletion requires a backend function using the service_role key.`);
     
     addAuditLogEntry(LogAction.REMOVE_KEY_PERSONNEL, `Rimosso profilo utente chiave: ${kpToRemove?.name || personnelAuthUserIdToRemove}. L'utente Supabase Auth potrebbe richiedere rimozione manuale o via backend.`);
@@ -369,7 +373,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const fetchDataForSedeAndYear = useCallback(async (sedeId: string, year: number) => {
     if (!supabase || !isSupabaseConfigured || !sedeId || !year) {
       const sedeNameForCache = sedi.find(s=>s.id === sedeId)?.name || sedeId || "unknown_sede";
-      if (year && sedeNameForCache) { // Ensure year and sedeName are valid before setting empty data
+      if (year && sedeNameForCache) { 
         setYearlySedeData(prevYSD => ({
           ...prevYSD,
           [year]: { ...(prevYSD[year] || {}), [sedeNameForCache]: getInitialSedeSpecificData() }
@@ -386,21 +390,21 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         supabase.from('courses').select('*, course_approvals(*)').eq('sede_id', sedeId).eq('year', year),
         supabase.from('assignments').select('*').eq('sede_id', sedeId).eq('year', year),
         supabase.from('plan_records').select('*, plan_approvals(*), created_by:key_personnel!created_by_user_id(name), last_modified_by:key_personnel!last_modified_by_user_id(name)')
-        .eq('sede_id', sedeId).eq('year', year).maybeSingle() // maybeSingle() handles 0 or 1 row
+        .eq('sede_id', sedeId).eq('year', year).maybeSingle()
       ]);
 
       if (employeesRes.error) throw employeesRes.error;
       if (coursesRes.error) throw coursesRes.error;
       if (assignmentsRes.error) throw assignmentsRes.error;
-      if (planRecordRes.error && planRecordRes.error.code !== 'PGRST116') throw planRecordRes.error; // PGRST116 means 0 rows, which is fine for maybeSingle
+      if (planRecordRes.error && planRecordRes.error.code !== 'PGRST116') throw planRecordRes.error;
 
       const fetchedData: SedeSpecificData = {
-        employees: (employeesRes.data || []).map(e => ({...e, roleHistory: e.role_history || [] })), // Ensure roleHistory is always an array
-        courses: (coursesRes.data || []).map(c => ({...c, approvals: c.course_approvals || []})),      // Ensure approvals is always an array
+        employees: (employeesRes.data || []).map(e => ({...e, roleHistory: e.role_history || [] })), 
+        courses: (coursesRes.data || []).map(c => ({...c, approvals: c.course_approvals || []})),      
         assignments: assignmentsRes.data || [],
         planRecord: planRecordRes.data ? { 
             ...planRecordRes.data, 
-            approvals: planRecordRes.data.plan_approvals || [], // Ensure approvals is always an array
+            approvals: planRecordRes.data.plan_approvals || [], 
             created_by_user_id: planRecordRes.data.created_by_user_id || undefined,
             created_by_name: (planRecordRes.data.created_by as any)?.name || undefined, 
             last_modified_by_user_id: planRecordRes.data.last_modified_by_user_id || undefined,
@@ -421,7 +425,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         [year]: { ...(prevYSD[year] || {}), [sedeName]: getInitialSedeSpecificData() }
       }));
     }
-  }, [sedi, supabase, addAuditLogEntry, isSupabaseConfigured]); // Added isSupabaseConfigured
+  }, [sedi, supabase, addAuditLogEntry, isSupabaseConfigured]); 
 
   const getSedeDataFromCache = useCallback((): SedeSpecificData | undefined => {
     if (!currentSedeId || !currentYear) return undefined;
@@ -446,13 +450,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         year: currentYear, 
         name: empData.name, 
         current_role: empData.initialRole 
-        // role_history for initial role should be handled by a trigger or subsequent insert
     });
     if (error) {
         addAuditLogEntry(LogAction.ADD_EMPLOYEE, `Errore aggiunta dipendente ${empData.name}: ${error.message}`);
         return { success: false, message: error.message };
     }
-    // TODO: Add initial role to role_history table via a separate call or Supabase function/trigger
     fetchDataForSedeAndYear(currentSedeId, currentYear); 
     addAuditLogEntry(LogAction.ADD_EMPLOYEE, `Aggiunto dipendente: ${empData.name}`);
     return { success: true };
@@ -468,7 +470,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ...courseData,
         sede_id: currentSedeId,
         year: currentYear,
-        status: TrainingCourseStatus.BOZZA // Default status for new course
+        status: TrainingCourseStatus.BOZZA 
     };
     const { data, error } = await supabase.from('courses').insert(dataToInsert).select().single();
     if (error) {
@@ -504,7 +506,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const course = getSedeCourses().find(c => c.id === courseId);
         if (!course) return { success: false, message: "Corso non trovato."};
 
-        // 1. Update course status
         const { error: updateError } = await supabase.from('courses')
             .update({ status: TrainingCourseStatus.APPROVATO_QP })
             .eq('id', courseId);
@@ -513,15 +514,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             return { success: false, message: `Errore aggiornamento stato corso: ${updateError.message}`};
         }
 
-        // 2. Add entry to course_approvals
         const { error: approvalError } = await supabase.from('course_approvals').insert({
             course_id: courseId,
             qp_auth_user_id: currentKeyPersonnel.auth_user_id,
             qp_name: currentKeyPersonnel.name
-            // approval_date is defaulted to now() by Postgres
         });
         if (approvalError) { 
-            // Potentially rollback course status update or log inconsistency
             addAuditLogEntry(LogAction.APPROVE_COURSE_QP, `Corso ID ${courseId} stato aggiornato ma errore registrazione approvazione: ${approvalError.message}`);
             return { success: false, message: `Errore registrazione approvazione: ${approvalError.message}. Stato corso modificato.`};
         }
@@ -531,7 +529,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return { success: true };
     };
 
-  // GxP Plan Approval Logic
   const approveOrRejectPlanStep = async (
     planRecordId: string, 
     approvingRole: KeyPersonnelRole.QP | KeyPersonnelRole.QA_CENTRALE,
@@ -541,7 +538,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!supabase || !isSupabaseConfigured || !currentSedeId || !currentYear || !currentKeyPersonnel) {
         return { success: false, message: "Azione non autorizzata o dati mancanti." };
     }
-    // Ensure the current user has the role they are claiming to approve/reject as, or is Admin
     if (currentKeyPersonnel.role !== approvingRole && currentKeyPersonnel.role !== KeyPersonnelRole.ADMIN) { 
         addAuditLogEntry(LogAction.PLAN_APPROVE_REJECT, `Tentativo fallito (ruolo non ${approvingRole}) da ${currentKeyPersonnel.name} per piano ID: ${planRecordId}`);
         return { success: false, message: `Azione non autorizzata. Richiesto ruolo ${approvingRole}.` };
@@ -553,51 +549,44 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     let nextStatus: PlanStatus | null = null;
-
-    // Determine the next status based on the current status, approving role, and decision
     if (approvingRole === KeyPersonnelRole.QP) {
         if (decision === 'Approvato') {
-            // QP can approve if it's IN_APPROVAZIONE_QP or if it was rejected by QA_CENTRALE and needs re-approval by QP
             if (planRecord.status === PlanStatus.IN_APPROVAZIONE_QP || planRecord.status === PlanStatus.RIGETTATO_QA_CENTRALE) {
-                 nextStatus = PlanStatus.APPROVATO_QP; // Next step could be IN_APPROVAZIONE_QA_CENTRALE if QA_CENTRALE is also required
+                 nextStatus = PlanStatus.APPROVATO_QP; 
             } else { return { success: false, message: `Stato piano (${planRecord.status}) non valido per approvazione QP.`};}
-        } else { // Rigettato
+        } else { 
             nextStatus = PlanStatus.RIGETTATO_QP;
         }
     } else if (approvingRole === KeyPersonnelRole.QA_CENTRALE) {
         if (decision === 'Approvato') {
-            // QA_CENTRALE can approve if it's IN_APPROVAZIONE_QA_CENTRALE (meaning QP already approved)
             if (planRecord.status === PlanStatus.IN_APPROVAZIONE_QA_CENTRALE || planRecord.status === PlanStatus.APPROVATO_QP) {
-                nextStatus = PlanStatus.APPROVATO; // Final approval state
+                nextStatus = PlanStatus.APPROVATO; 
             } else { return { success: false, message: `Stato piano (${planRecord.status}) non valido per approvazione QA Centrale.`};}
-        } else { // Rigettato
+        } else { 
             nextStatus = PlanStatus.RIGETTATO_QA_CENTRALE;
         }
     }
 
     if (!nextStatus) return { success: false, message: "Logica di stato non determinata."};
 
-    // 1. Update plan_records status
     const { error: updateError } = await supabase.from('plan_records')
-        .update({ status: nextStatus, last_modified_by_user_id: currentAuthUser?.id }) // last_modified_at updates via trigger
+        .update({ status: nextStatus, last_modified_by_user_id: currentAuthUser?.id }) 
         .eq('id', planRecordId);
     if (updateError) {
         addAuditLogEntry(LogAction.PLAN_APPROVE_REJECT, `Errore aggiornamento stato piano ID ${planRecordId}: ${updateError.message}`);
         return { success: false, message: `Errore aggiornamento stato piano: ${updateError.message}`};
     }
     
-    // 2. Add entry to plan_approvals
     const { error: approvalError } = await supabase.from('plan_approvals').insert({
         plan_record_id: planRecordId,
         approver_auth_user_id: currentKeyPersonnel.auth_user_id,
         approver_name: currentKeyPersonnel.name,
-        approver_role: currentKeyPersonnel.role, // Log the actual role of the user performing action
+        approver_role: currentKeyPersonnel.role, 
         approval_status: decision,
         approval_comment: comment,
-        approval_step: `${approvingRole}_APPROVAL` // Log which step this approval pertains to
+        approval_step: `${approvingRole}_APPROVAL` 
     });
     if (approvalError) {
-        // Consider rolling back the status update or logging the inconsistency
         addAuditLogEntry(LogAction.PLAN_APPROVE_REJECT, `Piano ID ${planRecordId} stato aggiornato a ${nextStatus} ma errore registrazione approvazione: ${approvalError.message}`);
         return { success: false, message: `Errore registrazione approvazione piano: ${approvalError.message}. Stato piano modificato.`};
     }
@@ -614,7 +603,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!supabase || !isSupabaseConfigured || !currentSedeId || !currentYear || !currentKeyPersonnel) {
       return { success: false, message: "Dati mancanti o utente non loggato." };
     }
-    // Typically QA_SITO or ADMIN submits the plan
     if (currentKeyPersonnel.role !== KeyPersonnelRole.QA_SITO && currentKeyPersonnel.role !== KeyPersonnelRole.ADMIN) {
         addAuditLogEntry(LogAction.PLAN_SUBMIT_FOR_APPROVAL, `Tentativo invio piano ID ${planRecordId} fallito: utente ${currentKeyPersonnel.name} non autorizzato (QA_SITO o Admin richiesto).`);
         return { success: false, message: "Azione non autorizzata (solo QA_SITO o Admin possono inviare il piano)." };
@@ -630,11 +618,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     if (targetRole === KeyPersonnelRole.QP) {
         nextStatus = PlanStatus.IN_APPROVAZIONE_QP;
-        // QA_SITO can submit a BOZZA, or a plan rejected by QP or QA_CENTRALE (after fixes), or one in IN_REVISIONE_QA_SITO
         requiredCurrentStatus = [PlanStatus.BOZZA, PlanStatus.RIGETTATO_QP, PlanStatus.RIGETTATO_QA_CENTRALE, PlanStatus.IN_REVISIONE_QA_SITO];
     } else if (targetRole === KeyPersonnelRole.QA_CENTRALE) {
         nextStatus = PlanStatus.IN_APPROVAZIONE_QA_CENTRALE;
-        // Plan can be submitted to QA_CENTRALE only if QP has approved it.
         requiredCurrentStatus = [PlanStatus.APPROVATO_QP]; 
     }
 
@@ -643,20 +629,18 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return { success: false, message: `Stato piano attuale (${planRecord.status}) non valido per invio a ${targetRole}. Richiesto uno tra: ${requiredCurrentStatus.join(', ')}` };
     }
 
-    // Check if all courses are approved by QP before submitting to QA_CENTRALE
     if (targetRole === KeyPersonnelRole.QA_CENTRALE) {
         const courses = getSedeCourses();
         const nonQPCourses = courses.filter(c => 
             c.status !== TrainingCourseStatus.APPROVATO_QP && 
-            c.status !== TrainingCourseStatus.PIANIFICATO && // Pianificato implica approvato
-            c.status !== TrainingCourseStatus.COMPLETATO   // Completato implica approvato
+            c.status !== TrainingCourseStatus.PIANIFICATO && 
+            c.status !== TrainingCourseStatus.COMPLETATO   
         );
         if (nonQPCourses.length > 0) {
             addAuditLogEntry(LogAction.PLAN_SUBMIT_FOR_APPROVAL, `Tentativo invio piano ID ${planRecordId} a QA_CENTRALE fallito: non tutti i corsi sono approvati QP.`);
             return { success: false, message: `Non tutti i corsi sono approvati dal QP. Corsi in sospeso: ${nonQPCourses.map(c=>c.name).join(', ')}`};
         }
     }
-
 
     const { error } = await supabase.from('plan_records')
         .update({ status: nextStatus, last_modified_by_user_id: currentAuthUser?.id })
@@ -672,32 +656,27 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return { success: true };
   };
 
-
-  // Placeholder implementations for functions not fully migrated to Supabase yet
   const notImplPromise = async () => { alert("Funzione non ancora implementata con Supabase."); return { success: false, message: "Non implementato" }; };
   const notImplVoid = () => alert("Funzione non ancora implementata con Supabase.");
   const notImplGetter = () => { return undefined as any; };
   
-  // CSV Import/Export - Keeping these fairly high-level for now
   const loadKeyPersonnelFromMasterCSV: DataContextType['loadKeyPersonnelFromMasterCSV'] = async (file) => {
       if (!supabase || !isSupabaseConfigured || !isAdminAuthenticated) return { success: false, message: "Non autorizzato o Supabase non pronto." };
       try {
-        // Assumes CSV has headers: name, role, email, passwordPlain
         const parsed = await parseCSV<{name: string, role: KeyPersonnelRole, email: string, passwordPlain: string}>(file, (headers) => (row) => ({
             name: row[headers.indexOf('name')],
-            role: row[headers.indexOf('role')] as KeyPersonnelRole, // Ensure role values match KeyPersonnelRole enum
+            role: row[headers.indexOf('role')] as KeyPersonnelRole, 
             email: row[headers.indexOf('email')],
-            passwordPlain: row[headers.indexOf('passwordplain')] // CSV header should be 'passwordplain'
+            passwordPlain: row[headers.indexOf('passwordplain')] 
         }));
 
         let successCount = 0;
         for (const p of parsed) {
-            // Validate role from CSV against KeyPersonnelRole enum
             if (!Object.values(KeyPersonnelRole).includes(p.role)) {
                 console.warn(`Ruolo '${p.role}' per utente '${p.name}' (email: ${p.email}) non valido. Riga saltata.`);
                 continue;
             }
-            const {success} = await addKeyPersonnel(p); // addKeyPersonnel handles both Auth and profile
+            const {success} = await addKeyPersonnel(p); 
             if (success) successCount++;
         }
         addAuditLogEntry(LogAction.DATA_UPLOAD, `Importati ${successCount}/${parsed.length} utenti chiave da CSV.`);
@@ -705,41 +684,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       } catch (e: any) { return { success: false, message: e.message }; }
   };
   
-  const loadDataForSedeYearFromCSV: DataContextType['loadDataForSedeYearFromCSV'] = async (sedeId, year, dataType, file) => {
-    if (!supabase || !isSupabaseConfigured || !currentSedeId || !currentYear) return { success: false, message: "Sede/Anno non selezionati o Supabase non pronto."};
-    // Basic authorization check (Admin or QA_SITO for data loading)
-    if (!currentKeyPersonnel || (currentKeyPersonnel.role !== KeyPersonnelRole.ADMIN && currentKeyPersonnel.role !== KeyPersonnelRole.QA_SITO)) {
-        return {success: false, message: "Azione non autorizzata."};
-    }
-
-    if (dataType === 'employees') {
-        try {
-            // Assumes CSV headers: name, initialRole, initialRoleStartDate
-            const parsed = await parseCSV<EmployeeCSVRow>(file, (headers) => (row) => ({
-                name: row[headers.indexOf('name')],
-                initialRole: row[headers.indexOf('initialrole')],
-                initialRoleStartDate: row[headers.indexOf('initialrolestartdate')],
-            }));
-            let successCount = 0;
-            for (const empCsv of parsed) {
-                // Using addEmployee function which already handles inserts and role history (if implemented there)
-                const { success: addSuccess } = await addEmployee({
-                    name: empCsv.name,
-                    currentRole: empCsv.initialRole, // Set by addEmployee
-                    initialRole: empCsv.initialRole,
-                    initialRoleStartDate: empCsv.initialRoleStartDate,
-                });
-                if (addSuccess) successCount++;
-            }
-            // fetchDataForSedeAndYear is called inside addEmployee if successful
-            addAuditLogEntry(LogAction.DATA_UPLOAD, `Importati ${successCount}/${parsed.length} dipendenti da CSV per SedeID ${currentSedeId}/${currentYear}.`);
-            return { success: true, count: successCount, message: `Importati ${successCount}/${parsed.length} dipendenti.` };
-        } catch (e: any) { return { success: false, message: e.message }; }
-    }
-    // TODO: Implement CSV import for 'courses', 'assignments', 'planStatus' (planRecords)
-    // For courses, ensure all new GxP fields are handled in CourseCSVRow and parsing logic.
-    return { success: false, message: `Import CSV per ${dataType} non ancora implementato.` };
-  };
+  // Rimuoviamo la funzione loadDataForSedeYearFromCSV
+  // const loadDataForSedeYearFromCSV: DataContextType['loadDataForSedeYearFromCSV'] = async (sedeId, year, dataType, file) => {
+  //   return { success: false, message: `Import CSV per ${dataType} non più supportato in questo modo. Gestire i dati tramite UI.` };
+  // };
 
   const exportDataToCSV: DataContextType['exportDataToCSV'] = async (exportType, sedeIdParam, yearParam) => {
     if (!supabase || !isSupabaseConfigured) { alert("Supabase non pronto."); return; }
@@ -751,7 +699,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     if (!targetSedeId || !targetYear) {
         if (exportType === 'keyPersonnel' || exportType === 'auditTrail') {
-            // These are global, no sede/year needed for query
+            // Global
         } else {
             alert("Sede e Anno devono essere selezionati per questo export."); return;
         }
@@ -766,7 +714,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 const { data: empData, error: empErr } = await supabase.from('employees').select('id, name, current_role, sede_id, year').eq('sede_id', targetSedeId!).eq('year', targetYear!);
                 if(empErr) throw empErr; dataToExport = empData || []; break;
             case 'courses': 
-                // Select all relevant fields for CSV export
                 const { data: crsData, error: crsErr } = await supabase.from('courses')
                     .select('id, name, description, date, duration_hours, category, status, training_type, trainer_info, planned_period, gxp_area, sede_id, year')
                     .eq('sede_id', targetSedeId!).eq('year', targetYear!);
@@ -778,16 +725,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                  const { data: planData, error: planErr } = await supabase.from('plan_records').select('id, sede_id, year, status').eq('sede_id', targetSedeId!).eq('year', targetYear!);
                 if(planErr) throw planErr; dataToExport = planData || []; break;
             case 'keyPersonnel':
-                // For keyPersonnel, email is in auth_users, so a join or separate query might be needed if email is essential for export.
-                // For simplicity, exporting from key_personnel table directly.
                 const { data: kpData, error: kpErr } = await supabase.from('key_personnel').select('auth_user_id, name, role'); 
                 if(kpErr) throw kpErr; dataToExport = kpData || []; filenameElements = { globalType: 'keyPersonnel'}; break;
             case 'auditTrail':
-                 const { data: auditData, error: auditErr } = await supabase.from('audit_log').select('*').order('timestamp', {ascending: false}).limit(1000); // Limit export size for performance
+                 const { data: auditData, error: auditErr } = await supabase.from('audit_log').select('*').order('timestamp', {ascending: false}).limit(1000);
                 if(auditErr) throw auditErr; dataToExport = auditData || []; filenameElements = { globalType: 'auditTrail'}; break;
             case 'allData':
-                // Exporting 'allData' would involve multiple calls and zipping files, or a server-side function.
-                // For client-side, it's better to export them individually.
                 alert("L'export 'allData' richiede l'esportazione separata dei singoli tipi di dato."); return;
             default: alert(`Export CSV per ${exportType} non ancora implementato.`); return;
         }
@@ -808,9 +751,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const setCurrentSedeId = (id: string | null) => {
     setCurrentSedeIdState(id);
-    if (!id) { // Clear data if sede is deselected
-        // setYearlySedeData(prev => ({ ...prev, [currentYear!]: { ...prev[currentYear!], [sedi.find(s => s.id === currentSedeId)?.name!]: getInitialSedeSpecificData() }}));
-    }
   };
   
   return (
@@ -821,19 +761,19 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       getSedeEmployees, getSedeCourses, getSedeAssignments, getSedePlanRecord,
       
       addEmployee, 
-      updateEmployeeRole: notImplPromise, // TODO: Implement updateEmployeeRole with Supabase
-      deleteEmployee: notImplPromise,  // TODO: Implement deleteEmployee with Supabase
+      updateEmployeeRole: notImplPromise, 
+      deleteEmployee: notImplPromise,  
       addCourse, updateCourse,
-      deleteCourse: notImplPromise, // TODO: Implement deleteCourse with Supabase     
+      deleteCourse: notImplPromise,     
       approveCourseByQP,
-      addAssignment: notImplPromise, // TODO: Implement addAssignment with Supabase    
-      updateAssignmentStatus: notImplPromise, // TODO: Implement updateAssignmentStatus with Supabase
-      addBatchAssignments: notImplPromise, // TODO: Implement addBatchAssignments with Supabase
-      deleteAssignment: notImplPromise, // TODO: Implement deleteAssignment with Supabase
+      addAssignment: notImplPromise,    
+      updateAssignmentStatus: notImplPromise, 
+      addBatchAssignments: notImplPromise, 
+      deleteAssignment: notImplPromise, 
       
-      getEmployeeById: notImplGetter,   // TODO: Implement getEmployeeById (can be client-side from cache or DB call)
-      getCourseById: notImplGetter,     // TODO: Implement getCourseById (can be client-side from cache or DB call)
-      clearCurrentSedeYearData: notImplVoid, // TODO: Implement clearCurrentSedeYearData (client-side cache clear)
+      getEmployeeById: notImplGetter,   
+      getCourseById: notImplGetter,     
+      clearCurrentSedeYearData: notImplVoid, 
       
       isAdminAuthenticated, currentKeyPersonnel,
       loginUser, logoutUser,
@@ -843,7 +783,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       submitPlanForApproval, approveOrRejectPlanStep,
       
       addAuditLogEntry, downloadAuditLog,
-      loadKeyPersonnelFromMasterCSV, loadDataForSedeYearFromCSV, exportDataToCSV,
+      loadKeyPersonnelFromMasterCSV, 
+      // loadDataForSedeYearFromCSV: loadDataForSedeYearFromCSV, // Rimosso
+      exportDataToCSV,
       isSupabaseConfigured
     }}>
       {children}
@@ -856,9 +798,5 @@ export const useData = (): DataContextType => {
   if (!context) {
     throw new Error('useData must be used within a DataProvider');
   }
-  // The warning for Supabase not being initialized is now handled by the isSupabaseConfigured flag and UI message.
-  // if (!supabase) { 
-  //   console.warn("Supabase client not initialized. Check Supabase URL/Anon Key in .env.local and console for errors.");
-  // }
   return context;
 };
