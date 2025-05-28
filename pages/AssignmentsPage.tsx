@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { useData } from '../contexts/DataContext';
 import { TrainingAssignment, AssignmentStatus } from '../types';
@@ -37,7 +36,7 @@ const AssignmentsPage: React.FC = () => {
 
   const handleOpenModal = (assignmentToEdit?: TrainingAssignment) => {
     if (!currentSedeId || !currentYear || !isDataEffectivelyLoaded) {
-        alert("Seleziona sede/anno e carica i dati (Supabase) prima di gestire le assegnazioni.");
+        alert("Seleziona sede/anno e carica i dati da Supabase prima di gestire le assegnazioni.");
         return;
     }
     if (employees.length === 0 || courses.length === 0) {
@@ -117,7 +116,7 @@ const AssignmentsPage: React.FC = () => {
     return <div className="text-center p-8 bg-white rounded-lg shadow-md"><p className="text-xl text-gray-600">Seleziona Sede e Anno dalla barra di navigazione.</p></div>;
   }
   if (!isDataEffectivelyLoaded && currentSedeId && currentYear) {
-    return <div className="text-center p-8 bg-white rounded-lg shadow-md"><p className="text-xl text-yellow-700">Dati per {currentSedeName || currentSedeId}/{currentYear} non caricati. Caricali da Supabase (solitamente automatico) o tramite Admin &gt; Import/Export CSV se necessario.</p></div>;
+    return <div className="text-center p-8 bg-white rounded-lg shadow-md"><p className="text-xl text-yellow-700">Dati per {currentSedeName || currentSedeId}/{currentYear} non caricati. Assicurati che siano presenti in Supabase e che la connessione sia attiva per il caricamento automatico.</p></div>;
   }
 
 
