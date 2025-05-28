@@ -5,35 +5,56 @@ export interface RoleEntry {
 }
 
 export interface Employee {
-  id: string;
+  id: string; // UUID from Supabase
+  sede_id: string; // Foreign key to sedi
+  year: number;
   name: string;
   currentRole: string;
-  roleHistory: RoleEntry[];
+  roleHistory?: RoleEntry[]; 
 }
 
 export enum TrainingCourseStatus {
   BOZZA = 'Bozza',
-  APPROVATO_QP = 'Approvato QP',
-  PIANIFICATO = 'Pianificato', // Stato precedente, potrebbe essere rimosso o ridefinito
+  APPROVATO_QP = 'Approvato QP', // Questo stato indica l'approvazione del singolo corso da parte del QP
+  PIANIFICATO = 'Pianificato', // Corso confermato e schedulato
   COMPLETATO = 'Completato',
   ANNULLATO = 'Annullato',
 }
 
 export interface CourseApproval {
-  qpId: string;
-  qpName: string;
-  approvalDate: string; // ISO datetime string
+  id?: string; // UUID from Supabase
+  course_id: string;
+  qp_auth_user_id: string; 
+  qp_name: string;
+  approval_date: string; // ISO datetime string
+}
+
+export enum TrainingType {
+  INIZIALE = 'Iniziale',
+  CONTINUA = 'Continua',
+  SPECIALE = 'Speciale',
+  OTJ = 'OTJ', // On The Job
 }
 
 export interface TrainingCourse {
-  id: string;
+  id: string; 
+  sede_id: string; 
+  year: number;
   name: string;
   description: string;
-  date: string; // ISO date string
+  date: string; // Data prevista/effettiva del corso
   durationHours: number;
-  category: string;
+  category: string; // Potrebbe essere reso più specifico o un enum
   status: TrainingCourseStatus;
-  approvals?: CourseApproval[]; // Traccia delle approvazioni QP
+  approvals?: CourseApproval[]; // Approvazioni specifiche del corso (es. da QP)
+
+  // Nuovi campi GxP
+  training_type?: TrainingType; // Es: Iniziale, Continua, Speciale, OTJ
+  trainer_info?: string; // Nome/i del/i formatore/i
+  planned_period?: string; // Es: 'Q1', 'Q2', 'Q3', 'Q4', o data specifica YYYY-MM-DD
+  gxp_area?: string; // Ambito GxP di pertinenza per gli argomenti
+  // `personale_coinvolto` è meglio gestirlo tramite la tabella `assignments`
+  // `argomenti da trattare` può essere parte della `description` o un campo a parte se strutturato
 }
 
 export enum AssignmentStatus {
@@ -44,77 +65,108 @@ export enum AssignmentStatus {
 }
 
 export interface TrainingAssignment {
-  id: string;
-  employeeId: string;
-  courseId: string;
-  assignmentDate: string; // ISO date string
+  id: string; 
+  sede_id: string;
+  year: number;
+  employee_id: string;
+  course_id: string;
+  assignmentDate: string; 
   completionStatus: AssignmentStatus;
-  completionDate: string | null; // ISO date string
+  completionDate: string | null; 
   score: number | null;
 }
 
-// For CSV parsing
 export interface EmployeeCSVRow {
-  id: string;
   name: string;
   initialRole: string;
-  initialRoleStartDate: string; // Expects YYYY-MM-DD
+  initialRoleStartDate: string; 
 }
 
 export interface CourseCSVRow {
-  id: string;
   name: string;
   description: string;
-  date: string; // Expects YYYY-MM-DD
-  durationHours: string; // Will be parsed to number
+  date: string; 
+  durationHours: string; 
   category: string;
-  status?: TrainingCourseStatus; // Optional: if status is in CSV
-  approvals?: CourseApproval[]; // Optional: if approvals are in CSV (complex)
+  status?: TrainingCourseStatus;
+  training_type?: TrainingType;
+  trainer_info?: string;
+  planned_period?: string;
+  gxp_area?: string;
 }
 
 export interface PlanStatusCSVRow {
-    planStatus: PlanStatus;
-    responsabileId?: string;
-    responsabileName?: string;
-    approvalDate?: string;
+    planStatus: PlanStatus; // Questo probabilmente va rimosso o ripensato, lo stato piano è più complesso
 }
 
-// For CSV Export
-export type CSVExportType = 'employees' | 'courses' | 'assignments' | 'keyPersonnel' | 'planStatus' | 'auditTrail' | 'encryptionKeyConfig';
 
-// --- Nuove definizioni per Admin e Approvazioni ---
-export type KeyPersonnelRole = 'QP' | 'QA' | 'Responsabile' | 'Admin';
+export type CSVExportType = 'employees' | 'courses' | 'assignments' | 'keyPersonnel' | 'planRecords' | 'auditTrail' | 'allData';
+
+// Ruoli GxP definiti
+export enum KeyPersonnelRole {
+  ADMIN = 'Admin', // Poteri assoluti sulla piattaforma
+  QA_SITO = 'QA_SITO', // Definisce fabbisogni, predispone piano, aggiorna schede, report esterni, integra piano
+  QP = 'QP', // Approva piano formativo di sito, approva modifiche piano
+  QA_CENTRALE = 'QA_CENTRALE' // Approva piano formativo di sito
+}
 
 export interface KeyPersonnel {
-  id: string;
+  id: string; // UUID da tabella key_personnel
+  auth_user_id: string; // UUID da auth.users.id
   name: string;
+  email?: string; 
   role: KeyPersonnelRole;
-  password: string; // Password in plain text for CSV storage (as per implicit requirement)
 }
 
+// Stati del Piano Formativo Annuale GxP
 export enum PlanStatus {
-  BOZZA = 'Bozza',
-  IN_APPROVAZIONE_RESPONSABILE = 'In Approvazione Responsabile',
-  APPROVATO = 'Approvato',
-  OBSOLETO = 'Obsoleto'
+  BOZZA = 'BOZZA', // Piano in preparazione da QA_SITO
+  IN_REVISIONE_QA_SITO = 'IN_REVISIONE_QA_SITO', // (Opzionale) QA_SITO lo marca per revisione interna
+  IN_APPROVAZIONE_QP = 'IN_APPROVAZIONE_QP', // Inviato a QP per approvazione
+  APPROVATO_QP = 'APPROVATO_QP', // Approvato da QP, in attesa di QA_CENTRALE
+  RIGETTATO_QP = 'RIGETTATO_QP', // Rigettato da QP
+  IN_APPROVAZIONE_QA_CENTRALE = 'IN_APPROVAZIONE_QA_CENTRALE', // Inviato a QA_CENTRALE
+  APPROVATO_QA_CENTRALE = 'APPROVATO_QA_CENTRALE', // Approvato da QA_CENTRALE (potrebbe essere stato finale se unico)
+  RIGETTATO_QA_CENTRALE = 'RIGETTATO_QA_CENTRALE', // Rigettato da QA_CENTRALE
+  APPROVATO = 'APPROVATO', // Piano approvato da tutti gli enti necessari (stato finale consolidato)
+  OBSOLETO = 'OBSOLETO' // Piano superato o non più valido
 }
 
 export interface PlanApproval {
-  responsabileId: string;
-  responsabileName: string;
-  approvalDate: string; // ISO datetime string
+  id?: string; 
+  plan_record_id: string;
+  approver_auth_user_id: string; 
+  approver_name: string;
+  approver_role: KeyPersonnelRole; // Ruolo GxP di chi approva/rigetta
+  approval_date: string; 
+  approval_status: 'Approvato' | 'Rigettato'; // Decisione
+  approval_comment?: string; // Commento opzionale, specialmente per rigetto
+  approval_step?: string; // Es. 'QP_APPROVAL', 'QA_CENTRALE_APPROVAL' per tracciare la fase
 }
+
+export interface PlanRecord { 
+  id: string; 
+  sede_id: string;
+  year: number;
+  status: PlanStatus;
+  approvals?: PlanApproval[];
+  created_by_user_id?: string;
+  created_by_name?: string; // Added
+  last_modified_by_user_id?: string;
+  last_modified_by_name?: string; // Added
+  last_modified_at?: string;
+}
+
 
 export interface SedeSpecificData {
   employees: Employee[];
   courses: TrainingCourse[];
   assignments: TrainingAssignment[];
-  planStatus: PlanStatus; 
-  planApprovals?: PlanApproval[];
+  planRecord?: PlanRecord; 
 }
 
 export interface SedeDataForYear {
-  [sedeName: string]: SedeSpecificData;
+  [sedeName: string]: SedeSpecificData; 
 }
 
 export interface YearlySedeData {
@@ -131,16 +183,13 @@ export interface BatchAssignmentPayload {
   completionStatus: AssignmentStatus;
 }
 
-// --- Audit Trail ---
 export enum LogAction {
   LOGIN = "LOGIN",
   LOGOUT = "LOGOUT",
   DATA_UPLOAD = "DATA_UPLOAD",
   DATA_DOWNLOAD = "DATA_DOWNLOAD",
-  ENCRYPTION_KEY_SET = "ENCRYPTION_KEY_SET",
-  ENCRYPTION_KEY_LOADED = "ENCRYPTION_KEY_LOADED",
-  ADMIN_LOGIN = "ADMIN_LOGIN",
-  ADMIN_LOGOUT = "ADMIN_LOGOUT",
+  ADMIN_LOGIN_ATTEMPT = "ADMIN_LOGIN_ATTEMPT", 
+  USER_LOGIN_ATTEMPT = "USER_LOGIN_ATTEMPT",
   ADD_SEDE = "ADD_SEDE",
   REMOVE_SEDE = "REMOVE_SEDE",
   ADD_KEY_PERSONNEL = "ADD_KEY_PERSONNEL",
@@ -152,108 +201,106 @@ export enum LogAction {
   ADD_COURSE = "ADD_COURSE",
   UPDATE_COURSE = "UPDATE_COURSE",
   DELETE_COURSE = "DELETE_COURSE",
-  APPROVE_COURSE_QP = "APPROVE_COURSE_QP",
+  APPROVE_COURSE_QP = "APPROVE_COURSE_QP", // Approvazione del singolo corso da QP
   ADD_ASSIGNMENT = "ADD_ASSIGNMENT",
   UPDATE_ASSIGNMENT = "UPDATE_ASSIGNMENT",
   DELETE_ASSIGNMENT = "DELETE_ASSIGNMENT",
-  APPROVE_PLAN_RESP = "APPROVE_PLAN_RESP",
-  CLEAR_SEDE_YEAR_DATA = "CLEAR_SEDE_YEAR_DATA",
+  PLAN_SUBMIT_FOR_APPROVAL = "PLAN_SUBMIT_FOR_APPROVAL", // QA_SITO invia piano per approvazione
+  PLAN_APPROVE_REJECT = "PLAN_APPROVE_REJECT", // QP o QA_CENTRALE approva/rigetta il piano
+  CLEAR_SEDE_YEAR_DATA = "CLEAR_SEDE_YEAR_DATA", 
   BATCH_ASSIGNMENTS = "BATCH_ASSIGNMENTS"
 }
 
 export interface AuditEntry {
-  id: string;
-  timestamp: string; // ISO datetime string
-  userId?: string; // ID of KeyPersonnel or 'ADMIN'
-  userName?: string; // Name of KeyPersonnel or 'ADMIN'
-  userRole?: KeyPersonnelRole | 'ADMIN_ROLE';
+  id?: string; 
+  timestamp?: string; 
+  user_id?: string | null; 
+  user_name?: string | null;
+  user_role?: string | null; 
   action: LogAction;
-  details: string; // e.g., "Uploaded employees.csv for SedeMilano/2023" or "Course 'XYZ' approved"
-  sede?: string | null;
+  details: string;
+  sede_id?: string | null; 
+  sede_name?: string | null; 
   year?: number | null;
 }
 
-export interface AuditLogCSVRow {
-  id: string;
-  timestamp: string;
-  userId?: string;
-  userName?: string;
-  userRole?: string;
-  action: string;
-  details: string;
-  sede?: string;
-  year?: string;
+export interface NewKeyPersonnelPayload extends Omit<KeyPersonnel, 'id' | 'auth_user_id'> {
+  email: string;
+  passwordPlain: string;
 }
-
-
-// --- Encryption Key Config ---
-export interface EncryptedKeyConfig {
-  iv: string; // Base64 encoded IV
-  encryptedKeyData: string; // Base64 encoded encrypted key material
-  salt: string; // Base64 encoded salt for PBKDF2
+export interface UpdateKeyPersonnelPayload {
+    name?: string;
+    role?: KeyPersonnelRole;
+    newPasswordPlain?: string;
 }
 
 
 export interface DataContextType {
-  sedi: string[];
-  currentSede: string | null;
-  setCurrentSede: (name: string | null) => void;
-  addSede: (name: string) => boolean;
-  removeSede: (name: string) => void;
+  sedi: { id: string, name: string }[]; 
+  currentSedeId: string | null; 
+  setCurrentSedeId: (id: string | null) => void;
+  addSede: (name: string) => Promise<{ success: boolean, message?: string }>;
+  removeSede: (id: string) => Promise<{ success: boolean, message?: string }>;
   
   currentYear: number | null;
   setCurrentYear: (year: number | null) => void;
-  availableYears: () => number[];
+  availableYears: () => number[]; 
 
-  yearlySedeData: YearlySedeData;
+  yearlySedeData: YearlySedeData; 
+  fetchDataForSedeAndYear: (sedeId: string, year: number) => Promise<void>; 
+
   getSedeEmployees: () => Employee[];
   getSedeCourses: () => TrainingCourse[];
   getSedeAssignments: () => TrainingAssignment[];
-  getSedePlanStatus: () => PlanStatus | undefined;
-  getSedePlanApprovals: () => PlanApproval[] | undefined;
+  getSedePlanRecord: () => PlanRecord | undefined; 
 
-  loadKeyPersonnelFromMasterCSV: (file: File) => Promise<void>;
-  loadSedeDataFromCSV: (sedeName: string, year: string, type: 'employees' | 'courses' | 'assignments', file: File) => Promise<void>;
-  loadSedePlanStatusFromCSV: (sedeName: string, year: string, file: File) => Promise<void>;
+  addEmployee: (employeeData: Omit<Employee, 'id' | 'sede_id' | 'year' | 'roleHistory'> & { initialRole: string; initialRoleStartDate: string }) => Promise<{ success: boolean, message?: string }>;
+  updateEmployeeRole: (employeeId: string, newRole: string, startDate: string) => Promise<{ success: boolean, message?: string }>;
+  deleteEmployee: (employeeId: string) => Promise<{ success: boolean, message?: string }>;
 
-  addEmployee: (employee: Omit<Employee, 'id' | 'roleHistory'> & { initialRole: string; initialRoleStartDate: string }) => void;
-  updateEmployeeRole: (employeeId: string, newRole: string, startDate: string) => void;
-  deleteEmployee: (employeeId: string) => void;
+  addCourse: (courseData: Omit<TrainingCourse, 'id' | 'sede_id' | 'year' | 'status' | 'approvals'>) => Promise<{ success: boolean, message?: string, newCourse?: TrainingCourse }>;
+  updateCourse: (courseId: string, updates: Partial<Omit<TrainingCourse, 'id' | 'sede_id' | 'year'>>) => Promise<{ success: boolean, message?: string }>;
+  deleteCourse: (courseId: string) => Promise<{ success: boolean, message?: string }>;
+  approveCourseByQP: (courseId: string) => Promise<{ success: boolean, message?: string }>; 
 
-  addCourse: (course: Omit<TrainingCourse, 'id' | 'status' | 'approvals'>) => void;
-  updateCourse: (courseId: string, updates: Partial<Omit<TrainingCourse, 'id'>>) => void;
-  deleteCourse: (courseId: string) => void;
-  approveCourseByQP: (courseId: string, qpId: string, qpPasswordPlain: string) => boolean;
+  addAssignment: (assignmentData: Omit<TrainingAssignment, 'id' | 'sede_id' | 'year'>) => Promise<{ success: boolean, message?: string }>;
+  updateAssignmentStatus: (assignmentId: string, status: AssignmentStatus, completionDate?: string, score?: number) => Promise<{ success: boolean, message?: string }>;
+  addBatchAssignments: (payload: BatchAssignmentPayload) => Promise<{ success: boolean, message?: string, count?: number }>;
+  deleteAssignment: (assignmentId: string) => Promise<{ success: boolean, message?: string }>;
 
-  addAssignment: (assignment: Omit<TrainingAssignment, 'id'>) => void;
-  updateAssignmentStatus: (assignmentId: string, status: AssignmentStatus, completionDate?: string, score?: number) => void;
-  addBatchAssignments: (payload: BatchAssignmentPayload) => void;
-  deleteAssignment: (assignmentId: string) => void;
-
-  getEmployeeById: (id: string) => Employee | undefined;
-  getCourseById: (id: string) => TrainingCourse | undefined;
+  getEmployeeById: (id: string) => Employee | undefined; 
+  getCourseById: (id: string) => TrainingCourse | undefined; 
   
-  clearCurrentSedeYearData: () => void;
+  clearCurrentSedeYearData: () => void; 
 
-  isAdminAuthenticated: boolean;
-  loginAdmin: (password: string) => boolean;
-  logoutAdmin: () => void;
+  isAdminAuthenticated: boolean; 
+  currentKeyPersonnel: KeyPersonnel | null; 
+  
+  loginUser: (email: string, passwordPlain: string) => Promise<{ success: boolean, message?: string }>;
+  logoutUser: () => Promise<{ success: boolean, message?: string }>;
+  
+  keyPersonnelList: KeyPersonnel[]; 
+  fetchKeyPersonnel: () => Promise<void>;
+  addKeyPersonnel: (personnelPayload: NewKeyPersonnelPayload) => Promise<{ success: boolean, message?: string }>;
+  updateKeyPersonnel: (personnelAuthUserId: string, updates: UpdateKeyPersonnelPayload) => Promise<{ success: boolean, message?: string }>;
+  removeKeyPersonnel: (personnelAuthUserId: string) => Promise<{ success: boolean, message?: string }>;
+  getKeyPersonnelByAuthId: (authUserId: string) => KeyPersonnel | undefined;
 
-  keyPersonnelList: KeyPersonnel[];
-  currentKeyPersonnel: KeyPersonnel | null;
-  loginKeyPersonnel: (name: string, passwordPlain: string) => boolean;
-  logoutKeyPersonnel: () => void;
-  addKeyPersonnel: (personnel: Omit<KeyPersonnel, 'id'>) => boolean;
-  updateKeyPersonnel: (personnelId: string, updates: Partial<Omit<KeyPersonnel, 'id' | 'password'>> & {newPassword?:string}) => boolean;
-  removeKeyPersonnel: (personnelId: string) => void;
-  getKeyPersonnelById: (id: string) => KeyPersonnel | undefined;
+  // Funzione per la gestione approvazioni piano GxP
+  submitPlanForApproval: (planRecordId: string, targetRole: KeyPersonnelRole.QP | KeyPersonnelRole.QA_CENTRALE) => Promise<{ success: boolean, message?: string }>;
+  approveOrRejectPlanStep: (
+    planRecordId: string, 
+    approvingRole: KeyPersonnelRole.QP | KeyPersonnelRole.QA_CENTRALE, // Chi sta approvando
+    decision: 'Approvato' | 'Rigettato',
+    comment?: string
+  ) => Promise<{ success: boolean, message?: string }>;
+  
+  addAuditLogEntry: (action: LogAction, details: string, sedeId?: string | null, year?: number | null) => Promise<void>;
+  downloadAuditLog: () => Promise<void>; 
 
-  approveCurrentSedePlanByResponsabile: (responsabileId: string, responsabilePasswordPlain: string) => boolean;
+  loadKeyPersonnelFromMasterCSV: (file: File) => Promise<{ success: boolean, message?: string, count?: number }>;
+  loadDataForSedeYearFromCSV: (sedeId: string, year: number, dataType: 'employees' | 'courses' | 'assignments' | 'planStatus', file: File) => Promise<{ success: boolean, message?: string, count?: number }>;
+  exportDataToCSV: (exportType: CSVExportType, sedeId?: string, year?: number) => Promise<void>;
 
-  // Encryption and Audit
-  setUserEncryptionKey: (password: string) => Promise<void>;
-  loadUserEncryptionKeyFromFile: (file: File) => Promise<void>;
-  addAuditLogEntry: (action: LogAction, details: string, overrideSede?: string | null, overrideYear?: number | null) => void;
-  downloadAuditLog: () => void;
-  isUserKeySet: () => boolean;
+  isSupabaseConfigured: boolean; // Nuovo stato
 }
