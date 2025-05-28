@@ -33,7 +33,7 @@ const EmployeesPage: React.FC = () => {
       setSelectedEmployee(employee);
     } else {
       if (!currentSedeId || !currentYear || !isDataEffectivelyLoaded) {
-        alert("Seleziona sede e anno, poi assicurati che i dati siano caricati (Supabase) o importa CSV da Admin prima di aggiungere.");
+        alert("Seleziona sede e anno, poi assicurati che i dati siano caricati da Supabase prima di aggiungere.");
         return;
       }
       setNewEmployeeData({ name: '', initialRole: '', initialRoleStartDate: new Date().toISOString().split('T')[0] });
@@ -59,7 +59,7 @@ const EmployeesPage: React.FC = () => {
 
   const handleOpenRoleModal = (employee: Employee) => {
     if (!currentSedeId || !currentYear || !isDataEffectivelyLoaded) {
-        alert("Dati sede/anno non caricati. Vai in Admin > Import/Export CSV o attendi caricamento da Supabase.");
+        alert("Dati sede/anno non caricati. Attendi il caricamento da Supabase.");
         return;
     }
     setSelectedEmployee(employee);
