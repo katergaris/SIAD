@@ -89,7 +89,7 @@ GEMINI_API_KEY=LA_TUA_CHIAVE_GEMINI_SE_USATA`}
                     <p className="text-sm text-orange-600 mt-1">
                         Assicurati di avere una connessione internet. I dati dovrebbero caricarsi automaticamente. Se i dati mancano completamente nel database per questa sede/anno, 
                         vai nelle rispettive pagine (Pianificazione, Dipendenti, Assegnazioni) per aggiungerli. 
-                        L'import CSV di massa per queste entità è per casi specifici tramite il <Link to="/admin" className="font-semibold underline hover:text-orange-800">Pannello Admin</Link>.
+                        Se necessario, gli utenti chiave (come Admin, QP) possono essere importati tramite CSV nel <Link to="/admin" className="font-semibold underline hover:text-orange-800">Pannello Admin</Link>.
                     </p>
                 </div>
             </div>
@@ -148,16 +148,16 @@ GEMINI_API_KEY=LA_TUA_CHIAVE_GEMINI_SE_USATA`}
             <ol className="list-decimal list-inside space-y-1">
               <li><strong>Login:</strong> Accedi con le tue credenziali.</li>
               <li>Seleziona <strong>Sede</strong> e <strong>Anno</strong> dalla barra di navigazione.</li>
-              <li>I dati dovrebbero caricarsi automaticamente da Supabase.</li>
-              <li><strong>Gestione Dati:</strong> Utilizza le sezioni Pianificazione, Dipendenti, Assegnazioni. Le modifiche sono salvate direttamente su Supabase.</li>
+              <li>I dati (dipendenti, corsi, piani, ecc.) dovrebbero caricarsi automaticamente da Supabase.</li>
+              <li><strong>Gestione Dati:</strong> Utilizza le sezioni Pianificazione, Dipendenti, Assegnazioni per aggiungere, modificare o visualizzare dati. Le modifiche sono salvate direttamente su Supabase.</li>
               <li><strong>Import Personale Chiave (Admin):</strong>
                 <ul className="list-disc list-inside pl-4 mt-1">
-                    <li>Vai al <Link to="/admin" className="font-semibold underline hover:text-yellow-800">Pannello Admin</Link> &gt; "Import/Export CSV".</li>
-                    <li>Importa <code>utenti_chiave.csv</code> (se necessario per aggiunte massive).</li>
+                    <li>Se necessario, per aggiunte massive di utenti con ruoli GxP (Admin, QA_SITO, QP, QA_CENTRALE), vai al <Link to="/admin" className="font-semibold underline hover:text-yellow-800">Pannello Admin</Link> &gt; "Import/Export CSV".</li>
+                    <li>Utilizza la funzione "Importa Utenti Chiave GxP (CSV)".</li>
                 </ul>
               </li>
-              <li><strong>Export CSV (Admin):</strong> Per backup o analisi esterne, usa la funzione di export nel Pannello Admin.</li>
-              <li><strong>Audit Log (Admin):</strong> Controlla le azioni nel sistema.</li>
+              <li><strong>Export CSV (Admin):</strong> Per backup o analisi esterne, usa la funzione di export nel Pannello Admin (esporta dipendenti, corsi, audit log, ecc.).</li>
+              <li><strong>Audit Log (Admin):</strong> Controlla le azioni nel sistema tramite il Pannello Admin.</li>
             </ol>
           </div>
         </div>
