@@ -148,19 +148,19 @@ const AdminPage: React.FC = () => {
               <li><strong>Configurazione Supabase (Una Tantum):</strong> Assicurati che il tuo progetto Supabase sia configurato con le tabelle corrette (vedi script SQL forniti) e che le variabili d'ambiente (`SUPABASE_URL`, `SUPABASE_ANON_KEY`) siano nel file `.env.local`.</li>
               <li><strong>Utenti Chiave GxP (Admin):</strong>
                 <ul className="list-disc list-inside pl-5 mt-1">
-                    <li>Aggiungi utenti chiave (Admin, QA_SITO, QP, QA_CENTRALE) tramite "Personale Chiave GxP". Questo creerà un account in Supabase Authentication e un profilo `key_personnel`.</li>
-                    <li>Importazione CSV: per il personale chiave, usa la sezione "Import/Export CSV". Richiede `name`, `role` (valido da enum GxP), `email`, `passwordPlain`.</li>
+                    <li>Aggiungi utenti chiave (Admin, QA_SITO, QP, QA_CENTRALE) tramite la sezione "Personale Chiave GxP". Questo creerà un account in Supabase Authentication e un profilo `key_personnel`.</li>
+                    <li>Per importazione massiva di personale chiave, usa la sezione "Import/Export CSV" &gt; "Importa Utenti Chiave GxP (CSV)". Richiede `name`, `role` (valido da enum GxP), `email`, `passwordPlain`.</li>
                 </ul>
               </li>
               <li><strong>Nomi Sedi (Admin):</strong> Aggiungi nomi sedi da "Gestione Nomi Sedi".</li>
-              <li><strong>Dati per Sede/Anno (Admin o Utenti Autorizzati GxP):</strong>
+              <li><strong>Dati per Sede/Anno (Dipendenti, Corsi, Assegnazioni, Piani):</strong>
                 <ul className="list-disc list-inside pl-5 mt-1">
-                  <li>Seleziona Sede/Anno.</li>
-                  <li>Dipendenti, Corsi, Assegnazioni e Piani vengono gestiti direttamente nelle rispettive pagine ("Pianificazione", "Dipendenti", "Assegnazioni"). Le modifiche sono salvate su Supabase.</li>
-                  <li>L'import CSV per popolare queste entità può essere usato per configurazioni iniziali o import massivi se necessario (usando l'opzione "Importa Dati Sede per Anno" se disponibile e ancora supportata, altrimenti l'aggiunta manuale è il metodo principale).</li>
+                  <li>Seleziona Sede/Anno dalla barra di navigazione.</li>
+                  <li>La gestione di Dipendenti, Corsi, Assegnazioni e Piani Formativi avviene direttamente nelle rispettive pagine ("Pianificazione", "Dipendenti", "Assegnazioni") attraverso l'interfaccia utente.</li>
+                  <li>Le modifiche sono salvate direttamente nel database Supabase. Non è previsto l'import CSV per queste entità.</li>
                 </ul>
               </li>
-              <li><strong>Salvataggio Modifiche:</strong> Le modifiche sono salvate direttamente su Supabase.</li>
+              <li><strong>Salvataggio Modifiche:</strong> Le modifiche effettuate tramite l'interfaccia utente sono salvate automaticamente su Supabase.</li>
               <li><strong>Export CSV (Backup/Analisi):</strong> Esporta dati da Supabase tramite la sezione "Import/Export CSV".</li>
                <li><strong>Sicurezza (Supabase):</strong> Gestita da Supabase Authentication e Row Level Security (RLS) policies. Assicurati che le RLS siano configurate correttamente per i ruoli GxP.</li>
             </ol>
@@ -256,22 +256,15 @@ const AdminPage: React.FC = () => {
                 />
             </div>
             
-            {/* Sezione Importa Dati Sede per Anno (CSV) è stata rimossa. */}
-            {/* La gestione di dipendenti, corsi, assegnazioni, e piani avviene ora */}
-            {/* direttamente nelle rispettive pagine (Pianificazione, Dipendenti, Assegnazioni). */}
-            {/* L'import CSV per queste entità potrebbe essere reintrodotto con una logica più specifica */}
-            {/* se necessario per bulk operations, ma non è più il metodo primario. */}
             <div className="p-4 border rounded-md bg-gray-100 border-gray-300">
-                 <h3 className="text-xl font-semibold text-gray-700 mb-2">Importazione Dati Operativi (Dipendenti, Corsi, ecc.)</h3>
+                 <h3 className="text-xl font-semibold text-gray-700 mb-2">Importazione Dati Operativi (Dipendenti, Corsi, Piani, ecc.)</h3>
                  <p className="text-sm text-gray-600 mb-3">
-                    La gestione dei dipendenti, corsi, assegnazioni e piani formativi avviene ora direttamente attraverso le rispettive sezioni dell'applicazione (Pianificazione, Dipendenti, Assegnazioni).
-                    Queste modifiche vengono salvate direttamente nel database Supabase. L'importazione CSV per queste entità non è più il metodo primario per l'inserimento dati.
+                    La gestione dei dipendenti, corsi, assegnazioni e piani formativi avviene ora esclusivamente attraverso le rispettive sezioni dell'applicazione (Pianificazione, Dipendenti, Assegnazioni) tramite interazione con il database Supabase.
                  </p>
                  <p className="text-sm text-gray-600">
-                    Per esportare dati per backup o analisi, utilizza le opzioni di seguito.
+                    Non è più supportata l'importazione CSV per queste entità operative. Per esportare dati per backup o analisi, utilizza le opzioni di esportazione qui sotto.
                  </p>
             </div>
-
 
             <div className="p-4 border rounded-md bg-purple-50 border-purple-200">
                 <h3 className="text-xl font-semibold text-purple-700 mb-2">Esporta Dati (CSV)</h3>
