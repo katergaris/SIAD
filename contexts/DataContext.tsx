@@ -1,3 +1,4 @@
+
 import React, { createContext, useState, useContext, useCallback, ReactNode, useEffect } from 'react';
 import { createClient, SupabaseClient, Session, AuthChangeEvent } from '@supabase/supabase-js';
 import { 
@@ -60,6 +61,25 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [keyPersonnelList, setKeyPersonnelList] = useState<KeyPersonnel[]>([]);
   const [isSupabaseConfigured] = useState<boolean>(initialIsSupabaseConfigured);
 
+  // Stable addAuditLogEntry to avoid loops in other useEffects if it were a direct dependency
+  const stableAddAuditLogEntry = useCallback(async (action: LogAction, details: string, sedeIdParam?: string | null, yearParam?: number | null, userForAudit?: KeyPersonnel | null, authUserForAudit?: InferredAuthUser | null) => {
+    if (!supabase || !isSupabaseConfigured) { console.error("Supabase client not available for audit log."); return; }
+    
+    const entry: Omit<AuditEntry, 'id'|'timestamp'> = {
+      user_id: authUserForAudit?.id,
+      user_name: userForAudit?.name || authUserForAudit?.email,
+      user_role: userForAudit?.role || (authUserForAudit ? 'AuthenticatedUser' : 'System/Unknown'),
+      action,
+      details,
+      sede_id: sedeIdParam, // Use passed params directly
+      year: yearParam,
+    };
+
+    const { error } = await supabase.from('audit_log').insert(entry);
+    if (error) console.error('Error adding audit log entry:', error.message || JSON.stringify(error));
+    else console.log(`[DataContext] Audit Log (DB): ${action} - ${details}`);
+  }, [isSupabaseConfigured, supabase]); // Only depends on stable factors
+
 
   useEffect(() => {
     if (!supabase || !isSupabaseConfigured) {
@@ -80,37 +100,43 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           .single();
         
         if (error && error.code !== 'PGRST116') { 
-             console.error('Error fetching key personnel profile:', error.message || JSON.stringify(error));
+             console.error('[DataContext] Error fetching key personnel profile:', error.message || JSON.stringify(error));
              setCurrentKeyPersonnel(null);
              setIsAdminAuthenticated(false);
-             addAuditLogEntry(LogAction.USER_LOGIN_ATTEMPT, `Errore caricamento profilo per ${supabaseUser.email}: ${error.message || JSON.stringify(error)}`);
+             stableAddAuditLogEntry(LogAction.USER_LOGIN_ATTEMPT, `Errore caricamento profilo per ${supabaseUser.email}: ${error.message || JSON.stringify(error)}`, currentSedeId, currentYear, null, supabaseUser);
         } else if (profile) {
             const kpProfile: KeyPersonnel = {
                 id: profile.id, 
                 auth_user_id: profile.auth_user_id,
                 name: profile.name,
-                email: supabaseUser.email,
+                email: supabaseUser.email, 
                 role: profile.role as KeyPersonnelRole, 
             };
             setCurrentKeyPersonnel(kpProfile);
-            setIsAdminAuthenticated(kpProfile.role === KeyPersonnelRole.ADMIN);
-            addAuditLogEntry(LogAction.LOGIN, `Login riuscito per ${kpProfile.name} (${kpProfile.role})`);
+            const isAdmin = kpProfile.role === KeyPersonnelRole.ADMIN;
+            setIsAdminAuthenticated(isAdmin);
+            console.log(`[DataContext] User ${kpProfile.name} logged in. Role: ${kpProfile.role}. isAdmin: ${isAdmin}`);
+            stableAddAuditLogEntry(LogAction.LOGIN, `Login riuscito per ${kpProfile.name} (${kpProfile.role})`, currentSedeId, currentYear, kpProfile, supabaseUser);
         } else {
             setCurrentKeyPersonnel(null);
             setIsAdminAuthenticated(false);
             const noProfileMsg = `Utente ${supabaseUser.email} autenticato ma senza profilo KeyPersonnel.`;
-            console.warn(noProfileMsg);
-            addAuditLogEntry(LogAction.USER_LOGIN_ATTEMPT, noProfileMsg);
+            console.warn(`[DataContext] ${noProfileMsg} isAdmin set to false.`);
+            stableAddAuditLogEntry(LogAction.USER_LOGIN_ATTEMPT, noProfileMsg, currentSedeId, currentYear, null, supabaseUser);
         }
 
       } else {
+        // User logged out or session expired
+        if (currentKeyPersonnel) { // Log logout only if a user was previously logged in
+            stableAddAuditLogEntry(LogAction.LOGOUT, `Logout per ${currentKeyPersonnel.name} (${currentKeyPersonnel.role})`, currentSedeId, currentYear, currentKeyPersonnel, currentAuthUser);
+        }
         setCurrentKeyPersonnel(null);
         setIsAdminAuthenticated(false);
       }
     });
     
     if(authSubscriptionError){
-        console.error("Error setting up onAuthStateChange listener:", authSubscriptionError);
+        console.error("[DataContext] Error setting up onAuthStateChange listener:", authSubscriptionError);
     }
     const subscription = authSubscriptionContainer?.subscription;
 
@@ -121,37 +147,90 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return () => {
       subscription?.unsubscribe();
     };
-  }, [isSupabaseConfigured]); 
+  }, [isSupabaseConfigured, stableAddAuditLogEntry, currentSedeId, currentYear, currentAuthUser, currentKeyPersonnel, supabase]);
+
+
+ const addAuditLogEntry = useCallback(async (action: LogAction, details: string, sedeIdParam?: string | null, yearParam?: number | null) => {
+    // This function now uses the stableAddAuditLogEntry with current context values
+    await stableAddAuditLogEntry(action, details, sedeIdParam !== undefined ? sedeIdParam : currentSedeId, yearParam !== undefined ? yearParam : currentYear, currentKeyPersonnel, currentAuthUser);
+}, [stableAddAuditLogEntry, currentSedeId, currentYear, currentKeyPersonnel, currentAuthUser]);
+
+
+  const fetchDataForSedeAndYear = useCallback(async (sedeId: string, year: number) => {
+    if (!supabase || !isSupabaseConfigured || !sedeId || !year) {
+      const sedeNameForCache = sedi.find(s=>s.id === sedeId)?.name || sedeId || "unknown_sede";
+      if (year && sedeNameForCache) { 
+        console.warn(`[DataContext] Supabase not configured or sedeId/year missing. Initializing empty data for ${sedeNameForCache}/${year}.`);
+        setYearlySedeData(prevYSD => ({
+          ...prevYSD,
+          [year]: { ...(prevYSD[year] || {}), [sedeNameForCache]: getInitialSedeSpecificData() }
+        }));
+      }
+      return;
+    }
+    
+    const sedeName = sedi.find(s => s.id === sedeId)?.name || sedeId;
+    console.log(`[DataContext] Fetching data for Sede ID: ${sedeId} ('${sedeName}'), Year: ${year}. Supabase configured: ${isSupabaseConfigured}`);
+    try {
+      const [employeesRes, coursesRes, assignmentsRes, planRecordRes] = await Promise.all([
+        supabase.from('employees').select('*, role_history(*)').eq('sede_id', sedeId).eq('year', year),
+        supabase.from('courses').select('*, course_approvals(*)').eq('sede_id', sedeId).eq('year', year),
+        supabase.from('assignments').select('*').eq('sede_id', sedeId).eq('year', year),
+        supabase.from('plan_records').select('*, plan_approvals(*), created_by:key_personnel!created_by_user_id(name), last_modified_by:key_personnel!last_modified_by_user_id(name)')
+        .eq('sede_id', sedeId).eq('year', year).maybeSingle()
+      ]);
+
+      console.log('[DataContext] Employees Response from Supabase:', JSON.stringify(employeesRes, null, 2));
+      console.log('[DataContext] Courses Response from Supabase:', JSON.stringify(coursesRes, null, 2));
+      console.log('[DataContext] Assignments Response from Supabase:', JSON.stringify(assignmentsRes, null, 2));
+      console.log('[DataContext] PlanRecord Response from Supabase:', JSON.stringify(planRecordRes, null, 2));
+
+      if (employeesRes.error) throw new Error(`Employees fetch error: ${employeesRes.error.message} (Code: ${employeesRes.error.code}) Details: ${employeesRes.error.details} Hint: ${employeesRes.error.hint}`);
+      if (coursesRes.error) throw new Error(`Courses fetch error: ${coursesRes.error.message} (Code: ${coursesRes.error.code}) Details: ${coursesRes.error.details} Hint: ${coursesRes.error.hint}`);
+      if (assignmentsRes.error) throw new Error(`Assignments fetch error: ${assignmentsRes.error.message} (Code: ${assignmentsRes.error.code}) Details: ${assignmentsRes.error.details} Hint: ${assignmentsRes.error.hint}`);
+      if (planRecordRes.error && planRecordRes.error.code !== 'PGRST116') throw new Error(`PlanRecord fetch error: ${planRecordRes.error.message} (Code: ${planRecordRes.error.code}) Details: ${planRecordRes.error.details} Hint: ${planRecordRes.error.hint}`);
+
+      const fetchedData: SedeSpecificData = {
+        employees: (employeesRes.data || []).map(e => ({...e, roleHistory: e.role_history || [] })), 
+        courses: (coursesRes.data || []).map(c => ({...c, approvals: c.course_approvals || []})),      
+        assignments: assignmentsRes.data || [],
+        planRecord: planRecordRes.data ? { 
+            ...planRecordRes.data, 
+            approvals: planRecordRes.data.plan_approvals || [], 
+            created_by_user_id: planRecordRes.data.created_by_user_id || undefined,
+            created_by_name: (planRecordRes.data.created_by as any)?.name || undefined, 
+            last_modified_by_user_id: planRecordRes.data.last_modified_by_user_id || undefined,
+            last_modified_by_name: (planRecordRes.data.last_modified_by as any)?.name || undefined,
+            last_modified_at: planRecordRes.data.last_modified_at || undefined
+        } : undefined,
+      };
+      
+      console.log(`[DataContext] Successfully fetched and processed data for ${sedeName}/${year}. Employees: ${fetchedData.employees.length}, Courses: ${fetchedData.courses.length}, Assignments: ${fetchedData.assignments.length}, Plan: ${!!fetchedData.planRecord}`);
+      setYearlySedeData(prevYSD => ({
+        ...prevYSD,
+        [year]: { ...(prevYSD[year] || {}), [sedeName]: fetchedData }
+      }));
+    } catch (error: any) {
+      console.error(`[DataContext] Error in fetchDataForSedeAndYear for ${sedeName}/${year}:`, error.message, error.stack ? error.stack : JSON.stringify(error));
+      addAuditLogEntry(LogAction.DATA_DOWNLOAD, `Errore caricamento dati per Sede ${sedeName}/${year}: ${error.message}`, sedeId, year);
+       setYearlySedeData(prevYSD => ({
+        ...prevYSD,
+        [year]: { ...(prevYSD[year] || {}), [sedeName]: getInitialSedeSpecificData() }
+      }));
+    }
+  }, [sedi, supabase, isSupabaseConfigured, addAuditLogEntry]); // addAuditLogEntry is now stable if derived from stableAddAuditLogEntry context or defined above
 
  useEffect(() => {
     if (currentSedeId && currentYear && supabase && isSupabaseConfigured) {
       fetchDataForSedeAndYear(currentSedeId, currentYear);
     }
-  }, [currentSedeId, currentYear, isSupabaseConfigured]);
+  }, [currentSedeId, currentYear, isSupabaseConfigured, fetchDataForSedeAndYear, supabase]); // Added fetchDataForSedeAndYear and supabase to dependencies
 
-
-  const addAuditLogEntry = useCallback(async (action: LogAction, details: string, sedeIdParam?: string | null, yearParam?: number | null) => {
-    if (!supabase || !isSupabaseConfigured) { console.error("Supabase client not available for audit log."); return; }
-    
-    const entry: Omit<AuditEntry, 'id'|'timestamp'> = {
-      user_id: currentAuthUser?.id,
-      user_name: currentKeyPersonnel?.name || currentAuthUser?.email,
-      user_role: currentKeyPersonnel?.role || (currentAuthUser ? 'AuthenticatedUser' : 'System/Unknown'),
-      action,
-      details,
-      sede_id: sedeIdParam !== undefined ? sedeIdParam : currentSedeId,
-      year: yearParam !== undefined ? yearParam : currentYear,
-    };
-
-    const { error } = await supabase.from('audit_log').insert(entry);
-    if (error) console.error('Error adding audit log entry:', error.message || JSON.stringify(error));
-    else console.log(`Audit Log (DB): ${action} - ${details}`);
-  }, [currentSedeId, currentYear, currentAuthUser, currentKeyPersonnel, isSupabaseConfigured]);
 
   const fetchSedi = async () => {
     if (!supabase || !isSupabaseConfigured) return;
     const { data, error } = await supabase.from('sedi').select('id, name').order('name');
-    if (error) console.error('Error fetching sedi:', error.message || JSON.stringify(error));
+    if (error) console.error('[DataContext] Error fetching sedi:', error.message || JSON.stringify(error));
     else setSedi(data || []);
   };
 
@@ -167,7 +246,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const { data, error } = await supabase.from('sedi').insert({ name: trimmedName }).select().single();
     
     if (error) {
-      console.error('Error adding sede:', error.message || JSON.stringify(error));
+      console.error('[DataContext] Error adding sede:', error.message || JSON.stringify(error));
       addAuditLogEntry(LogAction.ADD_SEDE, `Errore: ${trimmedName} - ${error.message}`);
       return { success: false, message: error.message };
     }
@@ -189,7 +268,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const sedeToRemove = sedi.find(s => s.id === id);
     const { error } = await supabase.from('sedi').delete().eq('id', id);
     if (error) {
-      console.error('Error removing sede:', error.message || JSON.stringify(error));
+      console.error('[DataContext] Error removing sede:', error.message || JSON.stringify(error));
       addAuditLogEntry(LogAction.REMOVE_SEDE, `Errore: ${sedeToRemove?.name || id} - ${error.message}`);
       return { success: false, message: error.message };
     }
@@ -212,14 +291,14 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         `);
 
     if (error) {
-        console.error('Error fetching key personnel list:', error.message || JSON.stringify(error));
+        console.error('[DataContext] Error fetching key personnel list:', error.message || JSON.stringify(error));
     } else {
         const mappedData = data?.map(p => ({
             id: p.id,
             auth_user_id: p.auth_user_id,
             name: p.name,
             role: p.role as KeyPersonnelRole,
-            email: (p.auth_users as any)?.email || '' 
+            email: (p.auth_users as { email: string }[] | null)?.[0]?.email || ''
         })) || [];
         setKeyPersonnelList(mappedData);
     }
@@ -229,20 +308,22 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!supabase || !isSupabaseConfigured) return { success: false, message: "Supabase client non disponibile." };
     const { data, error } = await (supabase.auth as any).signInWithPassword({ email, password: passwordPlain });
     if (error) {
-      console.error('Login error:', error.message || JSON.stringify(error));
-      addAuditLogEntry(LogAction.USER_LOGIN_ATTEMPT, `Login fallito per ${email}: ${error.message}`);
+      console.error('[DataContext] Login error:', error.message || JSON.stringify(error));
+      // Audit log for failed attempt is handled by onAuthStateChange if it results in a user object but no profile, or here for direct auth errors.
+      // Let onAuthStateChange handle detailed profile-related logging.
+      // addAuditLogEntry(LogAction.USER_LOGIN_ATTEMPT, `Login fallito per ${email}: ${error.message}`);
       return { success: false, message: error.message };
     }
+    // Successful auth, onAuthStateChange will handle profile loading and logging
     return { success: true };
   };
 
   const logoutUser = async (): Promise<{ success: boolean, message?: string }> => {
     if (!supabase || !isSupabaseConfigured) return { success: false, message: "Supabase client non disponibile." };
-    const userName = currentKeyPersonnel?.name || currentAuthUser?.email;
-    addAuditLogEntry(LogAction.LOGOUT, `Tentativo logout utente: ${userName}`);
+    // Logout audit is handled by onAuthStateChange when user becomes null
     const { error } = await (supabase.auth as any).signOut();
     if (error) {
-      console.error('Logout error:', error.message || JSON.stringify(error));
+      console.error('[DataContext] Logout error:', error.message || JSON.stringify(error));
       return { success: false, message: error.message };
     }
     return { success: true };
@@ -251,6 +332,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const addKeyPersonnel = async (payload: NewKeyPersonnelPayload): Promise<{ success: boolean, message?: string }> => {
     if (!supabase || !isSupabaseConfigured) return { success: false, message: "Supabase client non disponibile." };
     if (!currentKeyPersonnel || currentKeyPersonnel.role !== KeyPersonnelRole.ADMIN) {
+        addAuditLogEntry(LogAction.ADD_KEY_PERSONNEL, `Tentativo fallito (non Admin) da ${currentKeyPersonnel?.name || 'utente sconosciuto'} per ${payload.name}`);
         return { success: false, message: "Azione non autorizzata." };
     }
 
@@ -260,10 +342,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     });
 
     if (authError) {
-      console.error('Error signing up new key personnel in Supabase Auth:', authError.message || JSON.stringify(authError));
+      console.error('[DataContext] Error signing up new key personnel in Supabase Auth:', authError.message || JSON.stringify(authError));
+      addAuditLogEntry(LogAction.ADD_KEY_PERSONNEL, `Errore Auth creazione utente chiave ${payload.name}: ${authError.message}`);
       return { success: false, message: `Auth Error: ${authError.message}` };
     }
     if (!authData.user) {
+      addAuditLogEntry(LogAction.ADD_KEY_PERSONNEL, `Fallimento creazione utente chiave ${payload.name}: nessun utente Auth restituito.`);
       return { success: false, message: "Registrazione utente Auth fallita, nessun utente restituito." };
     }
 
@@ -274,9 +358,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     });
 
     if (profileError) {
-      console.error('Error creating key personnel profile:', profileError.message || JSON.stringify(profileError));
-      // Consider deleting the auth user if profile creation fails to avoid orphaned auth users
-      // await supabase.auth.admin.deleteUser(authData.user.id) // Requires service_role key, so must be a backend function
+      console.error('[DataContext] Error creating key personnel profile:', profileError.message || JSON.stringify(profileError));
+      addAuditLogEntry(LogAction.ADD_KEY_PERSONNEL, `Errore profilo utente chiave ${payload.name} (AuthID: ${authData.user.id}): ${profileError.message}. Utente Auth creato.`);
       return { success: false, message: `Profile Error: ${profileError.message}. Utente Auth creato ma profilo fallito.` };
     }
     
@@ -288,9 +371,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const updateKeyPersonnel = async (personnelAuthUserIdToUpdate: string, updates: UpdateKeyPersonnelPayload): Promise<{ success: boolean, message?: string }> => {
     if (!supabase || !isSupabaseConfigured) return { success: false, message: "Supabase client non disponibile." };
      if (!currentKeyPersonnel || currentKeyPersonnel.role !== KeyPersonnelRole.ADMIN) { 
+        addAuditLogEntry(LogAction.UPDATE_KEY_PERSONNEL, `Tentativo fallito (non Admin) da ${currentKeyPersonnel?.name || 'utente sconosciuto'} per utente AuthID ${personnelAuthUserIdToUpdate}`);
         return { success: false, message: "Azione non autorizzata." };
     }
-
+    
+    let profileUpdated = false;
     if (updates.name || updates.role) {
         const profileUpdates: Partial<Omit<KeyPersonnel, 'id' | 'auth_user_id' | 'email'>> = {};
         if(updates.name) profileUpdates.name = updates.name;
@@ -301,36 +386,47 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             .update(profileUpdates)
             .eq('auth_user_id', personnelAuthUserIdToUpdate);
         if (profileError) {
-            console.error('Error updating key personnel profile:', profileError.message || JSON.stringify(profileError));
+            console.error('[DataContext] Error updating key personnel profile:', profileError.message || JSON.stringify(profileError));
+            addAuditLogEntry(LogAction.UPDATE_KEY_PERSONNEL, `Errore aggiornamento profilo per utente AuthID ${personnelAuthUserIdToUpdate}: ${profileError.message}`);
             return { success: false, message: `Profile Update Error: ${profileError.message}` };
         }
+        profileUpdated = true;
     }
-
+    
+    let passwordChangeAttempted = false;
     if (updates.newPasswordPlain) {
+        passwordChangeAttempted = true;
         if (currentAuthUser?.id === personnelAuthUserIdToUpdate) { 
              const { error: passwordError } = await (supabase.auth as any).updateUser({ password: updates.newPasswordPlain });
              if (passwordError) {
-                console.error('Error updating user password (self):', passwordError.message || JSON.stringify(passwordError));
+                console.error('[DataContext] Error updating user password (self):', passwordError.message || JSON.stringify(passwordError));
+                addAuditLogEntry(LogAction.UPDATE_KEY_PERSONNEL, `Errore aggiornamento password (self) per utente AuthID ${personnelAuthUserIdToUpdate}: ${passwordError.message}`);
                 return { success: false, message: `Password Update Error: ${passwordError.message}` };
             }
         } else if (currentKeyPersonnel?.role === KeyPersonnelRole.ADMIN) { 
-            console.warn("L'admin non può cambiare la password di altri utenti direttamente dal client in questo modo. Richiede una funzione backend con privilegi admin.");
+            // This typically requires admin privileges on the Supabase client, often a server-side call.
+            console.warn("[DataContext] L'admin non può cambiare la password di altri utenti direttamente dal client in questo modo. Richiede una funzione backend con privilegi admin.");
+            addAuditLogEntry(LogAction.UPDATE_KEY_PERSONNEL, `Tentativo (client-side) di Admin di cambiare password per utente AuthID ${personnelAuthUserIdToUpdate} non supportato. Richiede backend.`);
+            // Not returning error here as profile might have been updated. The message should be clear to the user.
         }
     }
     
-    addAuditLogEntry(LogAction.UPDATE_KEY_PERSONNEL, `Aggiornato utente chiave (AuthID: ${personnelAuthUserIdToUpdate}). Dati: ${JSON.stringify(updates)}`);
-    fetchKeyPersonnelList();
-    if (currentAuthUser?.id === personnelAuthUserIdToUpdate) {
-        const { data: updatedProfile } = await supabase.from('key_personnel').select('*').eq('auth_user_id', personnelAuthUserIdToUpdate).single();
-        if (updatedProfile) {
-             setCurrentKeyPersonnel({
-                id: updatedProfile.id,
-                auth_user_id: updatedProfile.auth_user_id,
-                name: updatedProfile.name,
-                email: currentAuthUser.email,
-                role: updatedProfile.role as KeyPersonnelRole,
-            });
-            setIsAdminAuthenticated(updatedProfile.role === KeyPersonnelRole.ADMIN);
+    if (profileUpdated || passwordChangeAttempted) {
+        addAuditLogEntry(LogAction.UPDATE_KEY_PERSONNEL, `Aggiornato utente chiave (AuthID: ${personnelAuthUserIdToUpdate}). Dati: ${JSON.stringify(updates)}`);
+        fetchKeyPersonnelList();
+        // If current user's profile was updated, refresh it
+        if (currentAuthUser?.id === personnelAuthUserIdToUpdate) {
+            const { data: updatedProfile } = await supabase.from('key_personnel').select('*').eq('auth_user_id', personnelAuthUserIdToUpdate).single();
+            if (updatedProfile && currentAuthUser.email) { // check email too
+                setCurrentKeyPersonnel({
+                    id: updatedProfile.id,
+                    auth_user_id: updatedProfile.auth_user_id,
+                    name: updatedProfile.name,
+                    email: currentAuthUser.email,
+                    role: updatedProfile.role as KeyPersonnelRole,
+                });
+                setIsAdminAuthenticated(updatedProfile.role === KeyPersonnelRole.ADMIN);
+            }
         }
     }
     return { success: true };
@@ -339,6 +435,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const removeKeyPersonnel = async (personnelAuthUserIdToRemove: string): Promise<{ success: boolean, message?: string }> => {
     if (!supabase || !isSupabaseConfigured) return { success: false, message: "Supabase client non disponibile." };
      if (!currentKeyPersonnel || currentKeyPersonnel.role !== KeyPersonnelRole.ADMIN) {
+        addAuditLogEntry(LogAction.REMOVE_KEY_PERSONNEL, `Tentativo fallito (non Admin) da ${currentKeyPersonnel?.name || 'utente sconosciuto'} per utente AuthID ${personnelAuthUserIdToRemove}`);
         return { success: false, message: "Azione non autorizzata." };
     }
     if (currentAuthUser?.id === personnelAuthUserIdToRemove) {
@@ -348,12 +445,15 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const kpToRemove = keyPersonnelList.find(kp => kp.auth_user_id === personnelAuthUserIdToRemove);
     const { error: profileError } = await supabase.from('key_personnel').delete().eq('auth_user_id', personnelAuthUserIdToRemove);
     if (profileError) {
-      console.error('Error deleting key personnel profile:', profileError.message || JSON.stringify(profileError));
+      console.error('[DataContext] Error deleting key personnel profile:', profileError.message || JSON.stringify(profileError));
+      addAuditLogEntry(LogAction.REMOVE_KEY_PERSONNEL, `Errore rimozione profilo per utente AuthID ${personnelAuthUserIdToRemove}: ${profileError.message}`);
       return { success: false, message: `Profile Deletion Error: ${profileError.message}` };
     }
-    console.warn(`User profile for ${kpToRemove?.name || personnelAuthUserIdToRemove} deleted. Actual Supabase Auth user deletion requires a backend function using the service_role key.`);
     
-    addAuditLogEntry(LogAction.REMOVE_KEY_PERSONNEL, `Rimosso profilo utente chiave: ${kpToRemove?.name || personnelAuthUserIdToRemove}. L'utente Supabase Auth potrebbe richiedere rimozione manuale o via backend.`);
+    // Note: Supabase Auth user deletion requires admin privileges (typically service_role key from backend)
+    // This client-side operation only deletes the profile from 'key_personnel' table.
+    console.warn(`[DataContext] User profile for ${kpToRemove?.name || personnelAuthUserIdToRemove} (AuthID: ${personnelAuthUserIdToRemove}) deleted. Actual Supabase Auth user deletion requires a backend function using the service_role key.`);
+    addAuditLogEntry(LogAction.REMOVE_KEY_PERSONNEL, `Rimosso profilo utente chiave: ${kpToRemove?.name || personnelAuthUserIdToRemove} (AuthID: ${personnelAuthUserIdToRemove}). L'utente Supabase Auth potrebbe richiedere rimozione manuale o via backend.`);
     fetchKeyPersonnelList();
     return { success: true };
   };
@@ -368,69 +468,13 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const uniqueYears = Array.from(new Set(yearsFromData)).filter(y => !isNaN(y));
     return uniqueYears.length > 0 ? uniqueYears.sort((a,b) => b - a) : [new Date().getFullYear()];
   }, [yearlySedeData, currentYear]);
-
-
-  const fetchDataForSedeAndYear = useCallback(async (sedeId: string, year: number) => {
-    if (!supabase || !isSupabaseConfigured || !sedeId || !year) {
-      const sedeNameForCache = sedi.find(s=>s.id === sedeId)?.name || sedeId || "unknown_sede";
-      if (year && sedeNameForCache) { 
-        setYearlySedeData(prevYSD => ({
-          ...prevYSD,
-          [year]: { ...(prevYSD[year] || {}), [sedeNameForCache]: getInitialSedeSpecificData() }
-        }));
-      }
-      return;
-    }
-    
-    const sedeName = sedi.find(s => s.id === sedeId)?.name || sedeId;
-    console.log(`Fetching data for Sede ID: ${sedeId} (${sedeName}), Year: ${year}`);
-    try {
-      const [employeesRes, coursesRes, assignmentsRes, planRecordRes] = await Promise.all([
-        supabase.from('employees').select('*, role_history(*)').eq('sede_id', sedeId).eq('year', year),
-        supabase.from('courses').select('*, course_approvals(*)').eq('sede_id', sedeId).eq('year', year),
-        supabase.from('assignments').select('*').eq('sede_id', sedeId).eq('year', year),
-        supabase.from('plan_records').select('*, plan_approvals(*), created_by:key_personnel!created_by_user_id(name), last_modified_by:key_personnel!last_modified_by_user_id(name)')
-        .eq('sede_id', sedeId).eq('year', year).maybeSingle()
-      ]);
-
-      if (employeesRes.error) throw employeesRes.error;
-      if (coursesRes.error) throw coursesRes.error;
-      if (assignmentsRes.error) throw assignmentsRes.error;
-      if (planRecordRes.error && planRecordRes.error.code !== 'PGRST116') throw planRecordRes.error;
-
-      const fetchedData: SedeSpecificData = {
-        employees: (employeesRes.data || []).map(e => ({...e, roleHistory: e.role_history || [] })), 
-        courses: (coursesRes.data || []).map(c => ({...c, approvals: c.course_approvals || []})),      
-        assignments: assignmentsRes.data || [],
-        planRecord: planRecordRes.data ? { 
-            ...planRecordRes.data, 
-            approvals: planRecordRes.data.plan_approvals || [], 
-            created_by_user_id: planRecordRes.data.created_by_user_id || undefined,
-            created_by_name: (planRecordRes.data.created_by as any)?.name || undefined, 
-            last_modified_by_user_id: planRecordRes.data.last_modified_by_user_id || undefined,
-            last_modified_by_name: (planRecordRes.data.last_modified_by as any)?.name || undefined,
-            last_modified_at: planRecordRes.data.last_modified_at || undefined
-        } : undefined,
-      };
-      
-      setYearlySedeData(prevYSD => ({
-        ...prevYSD,
-        [year]: { ...(prevYSD[year] || {}), [sedeName]: fetchedData }
-      }));
-    } catch (error: any) {
-      console.error(`Error fetching data for ${sedeName}/${year}:`, error.message || JSON.stringify(error));
-      addAuditLogEntry(LogAction.DATA_DOWNLOAD, `Errore caricamento dati per Sede ${sedeName}/${year}: ${error.message}`, sedeId, year);
-       setYearlySedeData(prevYSD => ({
-        ...prevYSD,
-        [year]: { ...(prevYSD[year] || {}), [sedeName]: getInitialSedeSpecificData() }
-      }));
-    }
-  }, [sedi, supabase, addAuditLogEntry, isSupabaseConfigured]); 
-
+  
   const getSedeDataFromCache = useCallback((): SedeSpecificData | undefined => {
     if (!currentSedeId || !currentYear) return undefined;
     const sedeName = sedi.find(s => s.id === currentSedeId)?.name;
-    if (!sedeName) return undefined;
+    if (!sedeName) {
+        return undefined;
+    }
     return yearlySedeData[currentYear]?.[sedeName];
   }, [currentSedeId, currentYear, yearlySedeData, sedi]);
 
@@ -452,6 +496,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         current_role: empData.initialRole 
     });
     if (error) {
+        console.error("[DataContext] Error adding employee:", error);
         addAuditLogEntry(LogAction.ADD_EMPLOYEE, `Errore aggiunta dipendente ${empData.name}: ${error.message}`);
         return { success: false, message: error.message };
     }
@@ -474,6 +519,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
     const { data, error } = await supabase.from('courses').insert(dataToInsert).select().single();
     if (error) {
+        console.error("[DataContext] Error adding course:", error);
         addAuditLogEntry(LogAction.ADD_COURSE, `Errore aggiunta corso ${courseData.name}: ${error.message}`);
         return { success: false, message: error.message };
     }
@@ -490,6 +536,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
     const { error } = await supabase.from('courses').update(updates).eq('id', courseId);
     if (error) {
+        console.error("[DataContext] Error updating course:", error);
         addAuditLogEntry(LogAction.UPDATE_COURSE, `Errore aggiornamento corso ID ${courseId}: ${error.message}`);
         return { success: false, message: error.message };
     }
@@ -510,6 +557,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             .update({ status: TrainingCourseStatus.APPROVATO_QP })
             .eq('id', courseId);
         if (updateError) {
+            console.error("[DataContext] Error approving course (QP) - update status:", updateError);
             addAuditLogEntry(LogAction.APPROVE_COURSE_QP, `Errore aggiornamento stato corso ID ${courseId}: ${updateError.message}`);
             return { success: false, message: `Errore aggiornamento stato corso: ${updateError.message}`};
         }
@@ -520,6 +568,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             qp_name: currentKeyPersonnel.name
         });
         if (approvalError) { 
+            console.error("[DataContext] Error approving course (QP) - insert approval:", approvalError);
             addAuditLogEntry(LogAction.APPROVE_COURSE_QP, `Corso ID ${courseId} stato aggiornato ma errore registrazione approvazione: ${approvalError.message}`);
             return { success: false, message: `Errore registrazione approvazione: ${approvalError.message}. Stato corso modificato.`};
         }
@@ -573,6 +622,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         .update({ status: nextStatus, last_modified_by_user_id: currentAuthUser?.id }) 
         .eq('id', planRecordId);
     if (updateError) {
+        console.error("[DataContext] Error approving/rejecting plan (update status):", updateError);
         addAuditLogEntry(LogAction.PLAN_APPROVE_REJECT, `Errore aggiornamento stato piano ID ${planRecordId}: ${updateError.message}`);
         return { success: false, message: `Errore aggiornamento stato piano: ${updateError.message}`};
     }
@@ -587,6 +637,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         approval_step: `${approvingRole}_APPROVAL` 
     });
     if (approvalError) {
+        console.error("[DataContext] Error approving/rejecting plan (insert approval):", approvalError);
         addAuditLogEntry(LogAction.PLAN_APPROVE_REJECT, `Piano ID ${planRecordId} stato aggiornato a ${nextStatus} ma errore registrazione approvazione: ${approvalError.message}`);
         return { success: false, message: `Errore registrazione approvazione piano: ${approvalError.message}. Stato piano modificato.`};
     }
@@ -647,6 +698,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         .eq('id', planRecordId);
 
     if (error) {
+        console.error("[DataContext] Error submitting plan for approval:", error);
         addAuditLogEntry(LogAction.PLAN_SUBMIT_FOR_APPROVAL, `Errore invio piano ID ${planRecordId} a ${targetRole}: ${error.message}`);
         return { success: false, message: `Errore invio piano: ${error.message}` };
     }
@@ -658,10 +710,15 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const notImplPromise = async () => { alert("Funzione non ancora implementata con Supabase."); return { success: false, message: "Non implementato" }; };
   const notImplVoid = () => alert("Funzione non ancora implementata con Supabase.");
-  const notImplGetter = () => { return undefined as any; };
+  const notImplGetter = () => { 
+    return undefined as any; 
+  };
   
   const loadKeyPersonnelFromMasterCSV: DataContextType['loadKeyPersonnelFromMasterCSV'] = async (file) => {
-      if (!supabase || !isSupabaseConfigured || !isAdminAuthenticated) return { success: false, message: "Non autorizzato o Supabase non pronto." };
+      if (!supabase || !isSupabaseConfigured || !currentKeyPersonnel || currentKeyPersonnel.role !== KeyPersonnelRole.ADMIN ) { 
+        addAuditLogEntry(LogAction.DATA_UPLOAD, `Tentativo import utenti chiave CSV fallito (non Admin o Supabase non pronto).`);
+        return { success: false, message: "Non autorizzato o Supabase non pronto." };
+      }
       try {
         const parsed = await parseCSV<{name: string, role: KeyPersonnelRole, email: string, passwordPlain: string}>(file, (headers) => (row) => ({
             name: row[headers.indexOf('name')],
@@ -673,7 +730,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         let successCount = 0;
         for (const p of parsed) {
             if (!Object.values(KeyPersonnelRole).includes(p.role)) {
-                console.warn(`Ruolo '${p.role}' per utente '${p.name}' (email: ${p.email}) non valido. Riga saltata.`);
+                console.warn(`[DataContext] Ruolo '${p.role}' per utente '${p.name}' (email: ${p.email}) non valido. Riga saltata.`);
                 continue;
             }
             const {success} = await addKeyPersonnel(p); 
@@ -681,14 +738,13 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
         addAuditLogEntry(LogAction.DATA_UPLOAD, `Importati ${successCount}/${parsed.length} utenti chiave da CSV.`);
         return { success: true, count: successCount, message: `Importati ${successCount}/${parsed.length} utenti.` };
-      } catch (e: any) { return { success: false, message: e.message }; }
+      } catch (e: any) { 
+        console.error("[DataContext] Error loading key personnel from CSV:", e);
+        addAuditLogEntry(LogAction.DATA_UPLOAD, `Errore import utenti chiave CSV: ${e.message}`);
+        return { success: false, message: e.message }; 
+      }
   };
   
-  // Rimuoviamo la funzione loadDataForSedeYearFromCSV
-  // const loadDataForSedeYearFromCSV: DataContextType['loadDataForSedeYearFromCSV'] = async (sedeId, year, dataType, file) => {
-  //   return { success: false, message: `Import CSV per ${dataType} non più supportato in questo modo. Gestire i dati tramite UI.` };
-  // };
-
   const exportDataToCSV: DataContextType['exportDataToCSV'] = async (exportType, sedeIdParam, yearParam) => {
     if (!supabase || !isSupabaseConfigured) { alert("Supabase non pronto."); return; }
     const targetSedeId = sedeIdParam || currentSedeId;
@@ -725,8 +781,18 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                  const { data: planData, error: planErr } = await supabase.from('plan_records').select('id, sede_id, year, status').eq('sede_id', targetSedeId!).eq('year', targetYear!);
                 if(planErr) throw planErr; dataToExport = planData || []; break;
             case 'keyPersonnel':
-                const { data: kpData, error: kpErr } = await supabase.from('key_personnel').select('auth_user_id, name, role'); 
-                if(kpErr) throw kpErr; dataToExport = kpData || []; filenameElements = { globalType: 'keyPersonnel'}; break;
+                const { data: kpData, error: kpErr } = await supabase
+                    .from('key_personnel')
+                    .select('auth_user_id, name, role, auth_users(email)');
+                if(kpErr) throw kpErr; 
+                dataToExport = kpData?.map(p => ({
+                    auth_user_id: p.auth_user_id,
+                    name: p.name,
+                    role: p.role,
+                    email: (p.auth_users as { email: string }[] | null)?.[0]?.email || ''
+                })) || [];
+                filenameElements = { globalType: 'keyPersonnel'}; 
+                break;
             case 'auditTrail':
                  const { data: auditData, error: auditErr } = await supabase.from('audit_log').select('*').order('timestamp', {ascending: false}).limit(1000);
                 if(auditErr) throw auditErr; dataToExport = auditData || []; filenameElements = { globalType: 'auditTrail'}; break;
@@ -740,6 +806,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         await exportCSVUtil(dataToExport, exportType, filenameElements); 
         addAuditLogEntry(LogAction.DATA_DOWNLOAD, `Esportato ${exportType} per SedeID ${targetSedeId || 'Globale'}/${targetYear || 'N/A'}.`);
     } catch (e: any) {
+        console.error(`[DataContext] Errore durante l'export CSV per ${exportType}:`, e);
         alert(`Errore durante l'export CSV: ${e.message}`);
         addAuditLogEntry(LogAction.DATA_DOWNLOAD, `Errore export ${exportType}: ${e.message}`);
     }
@@ -784,7 +851,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       
       addAuditLogEntry, downloadAuditLog,
       loadKeyPersonnelFromMasterCSV, 
-      // loadDataForSedeYearFromCSV: loadDataForSedeYearFromCSV, // Rimosso
       exportDataToCSV,
       isSupabaseConfigured
     }}>
