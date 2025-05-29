@@ -1,4 +1,3 @@
-
 import React, { createContext, useState, useContext, useCallback, ReactNode, useEffect } from 'react';
 import { createClient, SupabaseClient, Session, AuthChangeEvent, Subscription } from '@supabase/supabase-js';
 import {
@@ -500,17 +499,99 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const getKeyPersonnelByAuthId = (authUserId: string): KeyPersonnel | undefined => {
         return keyPersonnelList.find(kp => kp.auth_user_id === authUserId);
     };
+    
+    const createPlanRecord = async (sedeId: string, year: number): Promise<{ success: boolean, message?: string, newPlan?: PlanRecord }> => {
+        if (!supabase || !isSupabaseConfigured) return { success: false, message: "Supabase client non disponibile." };
+        if (!currentKeyPersonnel || !(currentKeyPersonnel.role === KeyPersonnelRole.ADMIN || currentKeyPersonnel.role === KeyPersonnelRole.QA_SITO)) {
+            addAuditLogEntry(LogAction.CREATE_PLAN_RECORD, `Tentativo fallito (non autorizzato) per ${sedeId}/${year}`);
+            return { success: false, message: "Azione non autorizzata." };
+        }
+        if (!currentAuthUser) {
+             return { success: false, message: "Utente non autenticato." };
+        }
+
+        const sedeName = sedi.find(s => s.id === sedeId)?.name || sedeId;
+
+        // Check if a plan already exists (though UI should prevent this, good to double check)
+        const existingPlan = getSedePlanRecord(); // This checks the local cache
+        if (existingPlan && existingPlan.sede_id === sedeId && existingPlan.year === year) {
+             addAuditLogEntry(LogAction.CREATE_PLAN_RECORD, `Tentativo fallito (piano già esistente) per ${sedeName}/${year}`);
+             return { success: false, message: `Un piano per ${sedeName}/${year} esiste già.` };
+        }
+
+
+        const { data, error } = await supabase
+            .from('plan_records')
+            .insert({
+                sede_id: sedeId,
+                year: year,
+                status: PlanStatus.BOZZA,
+                created_by_user_id: currentAuthUser.id 
+            })
+            .select('*, created_by:key_personnel!created_by_user_id(name)')
+            .single();
+
+        if (error) {
+            console.error('[DataContext] Error creating plan record:', error.message);
+            addAuditLogEntry(LogAction.CREATE_PLAN_RECORD, `Errore creazione piano per ${sedeName}/${year}: ${error.message}`);
+            return { success: false, message: `Errore database: ${error.message}` };
+        }
+
+        if (data) {
+            addAuditLogEntry(LogAction.CREATE_PLAN_RECORD, `Creato piano per ${sedeName}/${year} con ID: ${data.id}`);
+            // Manually update the local cache structure for the new plan
+            const newPlanRecord: PlanRecord = {
+                ...data,
+                approvals: [], // New plan has no approvals yet
+                created_by_name: (data.created_by as any)?.name || currentKeyPersonnel.name, // Use current user's name as fallback
+            };
+            setYearlySedeData(prevYSD => {
+                const updatedYearData = { ...(prevYSD[year] || {}) };
+                const updatedSedeData = { ...(updatedYearData[sedeName] || getInitialSedeSpecificData()) };
+                updatedSedeData.planRecord = newPlanRecord;
+                updatedYearData[sedeName] = updatedSedeData;
+                return { ...prevYSD, [year]: updatedYearData };
+            });
+            // Optionally, call fetchDataForSedeAndYear to ensure full consistency if other related data might change
+            // await fetchDataForSedeAndYear(sedeId, year); 
+            return { success: true, newPlan: newPlanRecord };
+        }
+        return { success: false, message: "Errore sconosciuto nella creazione del piano." };
+    };
+
     const submitPlanForApproval = async (): Promise<{ success: boolean, message?: string }> => { /* Stub from prompt */ return { success: false }; };
     const approveOrRejectPlanStep = async (): Promise<{ success: boolean, message?: string }> => { /* Stub from prompt */ return { success: false }; };
     const downloadAuditLog = async (): Promise<void> => { /* Stub from prompt */ };
     const loadKeyPersonnelFromMasterCSV = async (): Promise<{ success: boolean, message?: string, count?: number }> => { /* Stub from prompt */ return { success: false }; };
     const exportDataToCSV = async (): Promise<void> => { /* Stub from prompt */ };
+    
     const availableYears = (): number[] => {
         const years = new Set<number>();
-        Object.keys(yearlySedeData).forEach(yearStr => years.add(parseInt(yearStr)));
-        if (currentYear) years.add(currentYear);
-        if (years.size === 0) years.add(new Date().getFullYear()); // Default to current year if no data
-        return Array.from(years).sort((a, b) => b - a);
+        const systemYear = new Date().getFullYear();
+
+        // Add years from existing data in yearlySedeData
+        Object.keys(yearlySedeData).forEach(yearStr => {
+            if (!isNaN(parseInt(yearStr))) {
+                years.add(parseInt(yearStr));
+            }
+        });
+
+        // Add a range of years around the system year (e.g., 3 years past, current, 3 years future)
+        for (let i = -3; i <= 3; i++) {
+            years.add(systemYear + i);
+        }
+
+        // Ensure currentYear from context is included if set
+        if (currentYear !== null && !isNaN(currentYear)) {
+            years.add(currentYear);
+        }
+        
+        // Fallback if the set is somehow still empty
+        if (years.size === 0) {
+            years.add(systemYear);
+        }
+        
+        return Array.from(years).sort((a, b) => b - a); // Sort descending
     };
 
   const removeKeyPersonnel = async (personnelAuthUserId: string): Promise<{ success: boolean, message?: string }> => {
@@ -551,6 +632,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isAdminAuthenticated, currentKeyPersonnel,
         loginUser, logoutUser,
         keyPersonnelList, fetchKeyPersonnel: fetchKeyPersonnelList, addKeyPersonnel, updateKeyPersonnel, removeKeyPersonnel, getKeyPersonnelByAuthId,
+        createPlanRecord, // Added new function
         submitPlanForApproval, approveOrRejectPlanStep,
         addAuditLogEntry, downloadAuditLog,
         loadKeyPersonnelFromMasterCSV, exportDataToCSV,
@@ -566,7 +648,5 @@ export const useData = (): DataContextType => {
   if (context === undefined) {
     throw new Error('useData must be used within a DataProvider');
   }
-  return context;
-};
   return context;
 };
