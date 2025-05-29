@@ -81,7 +81,7 @@ const Navbar: React.FC = () => {
     <>
       <nav className="bg-dark shadow-lg">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-auto md:h-20 py-2 flex-wrap">
+          <div className="flex items-center justify-between h-auto md:h-24 py-4 flex-wrap"> {/* Updated line */}
             <div className="flex items-center flex-shrink-0 mr-4">
               <NavLink to="/" className="text-white text-lg sm:text-xl font-bold flex items-center">
                  <img src="/logo.png" alt="SIAD Logo" className="h-7 sm:h-8 mr-2 sm:mr-3" />
@@ -123,7 +123,7 @@ const Navbar: React.FC = () => {
                 {currentKeyPersonnel ? (
                   <div className="flex items-center">
                     <span className="text-gray-300 text-sm mr-2 hidden sm:inline" title={currentKeyPersonnel.email}>
-                        Ciao, {currentKeyPersonnel.name} ({currentKeyPersonnel.role})
+                        Ciao, {currentKeyPersonnel.name} ({currentKeyPersonnel.roles.join(', ')})
                     </span>
                     <button onClick={handleUserLogout} className={linkClasses(false) + " bg-red-500 hover:bg-red-600"}>
                       <FaSignOutAlt /> <span className="hidden sm:inline">Logout</span>
