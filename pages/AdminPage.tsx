@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { useData } from '../contexts/DataContext';
 import { FaBuilding, FaUserCog, FaPlusCircle, FaTrash, FaEdit, FaUpload, FaFileCsv, FaDownload, FaFolderPlus, FaInfoCircle, FaClipboardList, FaLock, FaExclamationTriangle, FaBook, FaUserGraduate, FaLockOpen, FaKey } from 'react-icons/fa';
@@ -388,7 +389,7 @@ const AdminPage: React.FC = () => {
        <style>{`
         .th-cell { @apply px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider; }
         .td-cell { @apply px-6 py-4 whitespace-nowrap text-sm; }
-        .input-field { @apply mt-1 block w-full px-3 py-2 border border-gray-400 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm text-gray-900 bg-white; }
+        .input-field { @apply mt-1 block w-full px-3 py-2 border border-gray-500 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm text-gray-900 bg-white; }
         .input-field option { @apply text-gray-900; }
         .btn-primary { @apply inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-primary hover:bg-green-700 rounded-md transition-colors disabled:opacity-50; }
         .btn-secondary { @apply inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md border border-gray-300 transition-colors disabled:opacity-50; }
