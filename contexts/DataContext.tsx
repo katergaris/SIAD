@@ -1,3 +1,4 @@
+
 import React, { createContext, useState, useContext, useCallback, ReactNode, useEffect } from 'react';
 import { createClient, SupabaseClient, Session, AuthChangeEvent, Subscription } from '@supabase/supabase-js';
 import {
@@ -5,7 +6,7 @@ import {
     YearlySedeData, SedeSpecificData, BatchAssignmentPayload,
     KeyPersonnel, PlanStatus, CourseApproval, PlanApproval, PlanRecord, DataContextType, CSVExportType,
     AuditEntry, LogAction, KeyPersonnelRole, NewKeyPersonnelPayload, UpdateKeyPersonnelPayload,
-    TrainingType
+    TrainingType, RoleEntry
 } from '../types';
 import { parseCSV } from '../services/csvParser';
 import { exportDataToCSV as exportCSVUtil } from '../services/csvExporter';
@@ -70,7 +71,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const entry: Omit<AuditEntry, 'id'|'timestamp'> = {
       user_id: authUserForAudit?.id,
       user_name: userForAudit?.name || authUserForAudit?.email,
-      user_role: userForAudit?.role || (authUserForAudit ? 'AuthenticatedUser' : 'System/Unknown'),
+      user_role: userForAudit?.roles?.join(', ') || (authUserForAudit ? 'AuthenticatedUser' : 'System/Unknown'),
       action,
       details,
       sede_id: sedeIdParam,
@@ -96,9 +97,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       if (supabaseUser) {
         console.log(`[DataContext] onAuthStateChange: User session found for ${supabaseUser.email}. Fetching profile.`);
+        // Ensure you are selecting the 'roles' column (plural)
         const { data: profile, error } = await supabase
           .from('key_personnel')
-          .select('*')
+          .select('id, auth_user_id, name, roles') // Select 'roles'
           .eq('auth_user_id', supabaseUser.id)
           .single();
 
@@ -109,25 +111,29 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
              stableAddAuditLogEntry(LogAction.USER_LOGIN_ATTEMPT, `Errore caricamento profilo per ${supabaseUser.email}: ${error.message || JSON.stringify(error)}`, currentSedeId, currentYear, null, supabaseUser);
         } else if (profile) {
             console.log(`[DataContext] Profile fetched for ${supabaseUser.email}:`, profile);
-            const isValidRole = Object.values(KeyPersonnelRole).includes(profile.role as KeyPersonnelRole);
-            if (!isValidRole) {
-                console.warn(`[DataContext] Fetched profile for ${supabaseUser.email} has an INVALID or UNRECOGNIZED role: '${profile.role}'. Expected one of [${Object.values(KeyPersonnelRole).join(', ')}]. Treating as no valid profile. This could be due to a schema mismatch after SQL script execution if the 'role' column or its ENUM values are not as expected.`);
+            
+            // Ensure profile.roles is an array and validate its contents
+            const rolesArray = Array.isArray(profile.roles) ? profile.roles : [];
+            const validRoles = rolesArray.filter(r => Object.values(KeyPersonnelRole).includes(r as KeyPersonnelRole));
+
+            if (validRoles.length === 0) {
+                console.warn(`[DataContext] Fetched profile for ${supabaseUser.email} has no valid roles or 'roles' is not a valid array: '${JSON.stringify(profile.roles)}'. Expected array of [${Object.values(KeyPersonnelRole).join(', ')}]. Treating as no valid profile.`);
                 setCurrentKeyPersonnel(null);
                 setIsAdminAuthenticated(false);
-                stableAddAuditLogEntry(LogAction.USER_LOGIN_ATTEMPT, `Profilo ${supabaseUser.email} con ruolo non valido: ${profile.role}`, currentSedeId, currentYear, null, supabaseUser);
+                stableAddAuditLogEntry(LogAction.USER_LOGIN_ATTEMPT, `Profilo ${supabaseUser.email} con ruoli non validi o mancanti: ${JSON.stringify(profile.roles)}`, currentSedeId, currentYear, null, supabaseUser);
             } else {
                 const kpProfile: KeyPersonnel = {
                     id: profile.id,
                     auth_user_id: profile.auth_user_id,
                     name: profile.name,
                     email: supabaseUser.email,
-                    role: profile.role as KeyPersonnelRole,
+                    roles: validRoles as KeyPersonnelRole[],
                 };
                 setCurrentKeyPersonnel(kpProfile);
-                const isAdmin = kpProfile.role === KeyPersonnelRole.ADMIN;
+                const isAdmin = kpProfile.roles.includes(KeyPersonnelRole.ADMIN);
                 setIsAdminAuthenticated(isAdmin);
-                console.log(`[DataContext] User ${kpProfile.name} logged in. Role: ${kpProfile.role}. isAdmin: ${isAdmin}`);
-                stableAddAuditLogEntry(LogAction.LOGIN, `Login riuscito per ${kpProfile.name} (${kpProfile.role})`, currentSedeId, currentYear, kpProfile, supabaseUser);
+                console.log(`[DataContext] User ${kpProfile.name} logged in. Roles: ${kpProfile.roles.join(', ')}. isAdmin: ${isAdmin}`);
+                stableAddAuditLogEntry(LogAction.LOGIN, `Login riuscito per ${kpProfile.name} (${kpProfile.roles.join(', ')})`, currentSedeId, currentYear, kpProfile, supabaseUser);
             }
         } else {
             setCurrentKeyPersonnel(null);
@@ -140,7 +146,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       } else {
         if (currentKeyPersonnel) {
             console.log(`[DataContext] onAuthStateChange: User logged out or session ended for ${currentKeyPersonnel.name}.`);
-            stableAddAuditLogEntry(LogAction.LOGOUT, `Logout per ${currentKeyPersonnel.name} (${currentKeyPersonnel.role})`, currentSedeId, currentYear, currentKeyPersonnel, currentAuthUser);
+            stableAddAuditLogEntry(LogAction.LOGOUT, `Logout per ${currentKeyPersonnel.name} (${currentKeyPersonnel.roles.join(', ')})`, currentSedeId, currentYear, currentKeyPersonnel, currentAuthUser);
         }
         setCurrentKeyPersonnel(null);
         setIsAdminAuthenticated(false);
@@ -248,7 +254,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const addSede = async (name: string): Promise<{ success: boolean, message?: string }> => {
     if (!supabase || !isSupabaseConfigured) return { success: false, message: "Supabase client non disponibile." };
     if (!name.trim()) return { success: false, message: "Nome sede non valido."};
-    if (!currentKeyPersonnel || currentKeyPersonnel.role !== KeyPersonnelRole.ADMIN) {
+    if (!currentKeyPersonnel || !currentKeyPersonnel.roles.includes(KeyPersonnelRole.ADMIN)) {
         addAuditLogEntry(LogAction.ADD_SEDE, `Tentativo fallito (non Admin): ${name}`);
         return { success: false, message: "Azione non autorizzata." };
     }
@@ -272,7 +278,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const removeSede = async (id: string): Promise<{ success: boolean, message?: string }> => {
     if (!supabase || !isSupabaseConfigured) return { success: false, message: "Supabase client non disponibile." };
-    if (!currentKeyPersonnel || currentKeyPersonnel.role !== KeyPersonnelRole.ADMIN) {
+    if (!currentKeyPersonnel || !currentKeyPersonnel.roles.includes(KeyPersonnelRole.ADMIN)) {
         addAuditLogEntry(LogAction.REMOVE_SEDE, `Tentativo fallito (non Admin) ID: ${id}`);
         return { success: false, message: "Azione non autorizzata." };
     }
@@ -297,7 +303,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             id,
             auth_user_id,
             name,
-            role,
+            roles, 
             auth_users (email)
         `);
 
@@ -308,7 +314,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             id: p.id,
             auth_user_id: p.auth_user_id,
             name: p.name,
-            role: p.role as KeyPersonnelRole,
+            roles: Array.isArray(p.roles) ? p.roles as KeyPersonnelRole[] : [], // Ensure roles is an array
             email: (p.auth_users as { email: string }[] | null)?.[0]?.email || ''
         })) || [];
         setKeyPersonnelList(mappedData);
@@ -324,6 +330,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return { success: false, message: error.message };
     }
     console.log(`[DataContext] Supabase auth.signInWithPassword successful for ${email}. Session:`, data?.session);
+    // onAuthStateChange will handle setting currentKeyPersonnel
     return { success: true };
   };
 
@@ -335,16 +342,21 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       console.error('[DataContext] Logout error:', error.message || JSON.stringify(error));
       return { success: false, message: error.message };
     }
+    // onAuthStateChange will clear currentKeyPersonnel
     console.log(`[DataContext] Logout successful.`);
     return { success: true };
   };
 
   const addKeyPersonnel = async (payload: NewKeyPersonnelPayload): Promise<{ success: boolean, message?: string }> => {
     if (!supabase || !isSupabaseConfigured) return { success: false, message: "Supabase client non disponibile." };
-    if (!currentKeyPersonnel || currentKeyPersonnel.role !== KeyPersonnelRole.ADMIN) {
+    if (!currentKeyPersonnel || !currentKeyPersonnel.roles.includes(KeyPersonnelRole.ADMIN)) {
         addAuditLogEntry(LogAction.ADD_KEY_PERSONNEL, `Tentativo fallito (non Admin) da ${currentKeyPersonnel?.name || 'utente sconosciuto'} per ${payload.name}`);
         return { success: false, message: "Azione non autorizzata." };
     }
+    if (!payload.roles || payload.roles.length === 0) {
+        return { success: false, message: "È necessario specificare almeno un ruolo." };
+    }
+
 
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email: payload.email,
@@ -364,23 +376,25 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const { error: profileError } = await supabase.from('key_personnel').insert({
       auth_user_id: authData.user.id,
       name: payload.name,
-      role: payload.role,
+      roles: payload.roles, // Insert roles array
     });
 
     if (profileError) {
       console.error('[DataContext] Error creating key personnel profile:', profileError.message || JSON.stringify(profileError));
       addAuditLogEntry(LogAction.ADD_KEY_PERSONNEL, `Errore profilo utente chiave ${payload.name} (AuthID: ${authData.user.id}): ${profileError.message}. Utente Auth creato.`);
+      // Consider deleting the auth user if profile creation fails to avoid orphaned auth users
+      // await supabase.auth.admin.deleteUser(authData.user.id) // Requires admin privileges for Supabase client
       return { success: false, message: `Profile Error: ${profileError.message}. Utente Auth creato ma profilo fallito.` };
     }
 
-    addAuditLogEntry(LogAction.ADD_KEY_PERSONNEL, `Aggiunto utente chiave: ${payload.name} (${payload.role}), Email: ${payload.email}`);
+    addAuditLogEntry(LogAction.ADD_KEY_PERSONNEL, `Aggiunto utente chiave: ${payload.name} (${payload.roles.join(', ')}), Email: ${payload.email}`);
     fetchKeyPersonnelList();
     return { success: true };
   };
 
   const updateKeyPersonnel = async (personnelAuthUserIdToUpdate: string, updates: UpdateKeyPersonnelPayload): Promise<{ success: boolean, message?: string }> => {
     if (!supabase || !isSupabaseConfigured) return { success: false, message: "Supabase client non disponibile." };
-     if (!currentKeyPersonnel || currentKeyPersonnel.role !== KeyPersonnelRole.ADMIN) {
+     if (!currentKeyPersonnel || !currentKeyPersonnel.roles.includes(KeyPersonnelRole.ADMIN)) {
         addAuditLogEntry(LogAction.UPDATE_KEY_PERSONNEL, `Tentativo fallito (non Admin) da ${currentKeyPersonnel?.name || 'utente sconosciuto'} per utente AuthID ${personnelAuthUserIdToUpdate}`);
         return { success: false, message: "Azione non autorizzata." };
     }
@@ -388,25 +402,33 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     let profileUpdated = false;
     let passwordUpdatedSuccessfully = false;
 
-    if (updates.name || updates.role) {
+    if (updates.name || updates.roles) {
         const profileUpdates: Partial<Omit<KeyPersonnel, 'id' | 'auth_user_id' | 'email'>> = {};
         if(updates.name) profileUpdates.name = updates.name;
-        if(updates.role) profileUpdates.role = updates.role;
-
-        const { error: profileError } = await supabase
-            .from('key_personnel')
-            .update(profileUpdates)
-            .eq('auth_user_id', personnelAuthUserIdToUpdate);
-        if (profileError) {
-            console.error('[DataContext] Error updating key personnel profile:', profileError.message || JSON.stringify(profileError));
-            addAuditLogEntry(LogAction.UPDATE_KEY_PERSONNEL, `Errore aggiornamento profilo per utente AuthID ${personnelAuthUserIdToUpdate}: ${profileError.message}`);
-            return { success: false, message: `Profile Update Error: ${profileError.message}` };
+        if(updates.roles) {
+            if (updates.roles.length === 0) {
+                return { success: false, message: "L'utente deve avere almeno un ruolo." };
+            }
+            profileUpdates.roles = updates.roles;
         }
-        profileUpdated = true;
+
+        if (Object.keys(profileUpdates).length > 0) {
+            const { error: profileError } = await supabase
+                .from('key_personnel')
+                .update(profileUpdates)
+                .eq('auth_user_id', personnelAuthUserIdToUpdate);
+            if (profileError) {
+                console.error('[DataContext] Error updating key personnel profile:', profileError.message || JSON.stringify(profileError));
+                addAuditLogEntry(LogAction.UPDATE_KEY_PERSONNEL, `Errore aggiornamento profilo per utente AuthID ${personnelAuthUserIdToUpdate}: ${profileError.message}`);
+                return { success: false, message: `Profile Update Error: ${profileError.message}` };
+            }
+            profileUpdated = true;
+        }
     }
 
     if (updates.newPasswordPlain) {
-        if (currentAuthUser?.id === personnelAuthUserIdToUpdate) {
+        // Password update for self or by admin (admin case needs special handling, often server-side)
+        if (currentAuthUser?.id === personnelAuthUserIdToUpdate) { // User updates their own password
              const { error: passwordError } = await supabase.auth.updateUser({ password: updates.newPasswordPlain });
              if (passwordError) {
                 console.error('[DataContext] Error updating user password (self):', passwordError.message || JSON.stringify(passwordError));
@@ -414,10 +436,14 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 return { success: false, message: `Password Update Error: ${passwordError.message}` };
             }
             passwordUpdatedSuccessfully = true;
-        } else if (currentKeyPersonnel?.role === KeyPersonnelRole.ADMIN) {
-           console.warn("[DataContext] Password change for another user by admin is typically a server-side operation with service_role key. This client-side attempt might fail or is not supported directly for other users via supabase.auth.updateUser().");
-           addAuditLogEntry(LogAction.UPDATE_KEY_PERSONNEL, `Tentativo di Admin di cambiare password per utente AuthID ${personnelAuthUserIdToUpdate} non supportato client-side.`);
-           return { success: false, message: "La modifica della password di altri utenti da parte dell'admin non è supportata direttamente lato client con la chiave anon." };
+        } else if (currentKeyPersonnel?.roles.includes(KeyPersonnelRole.ADMIN)) { // Admin attempts to update another user's password
+           // IMPORTANT: supabase.auth.admin.updateUserById() is required for this and needs service_role key.
+           // This client-side attempt with anon key will fail for other users.
+           console.warn(`[DataContext] Admin password change for another user (AuthID: ${personnelAuthUserIdToUpdate}) initiated. This typically requires server-side logic with a service_role key. Client-side updateUser is for the current session user.`);
+           // For now, let's prevent this on client, or inform it might not work as expected.
+           addAuditLogEntry(LogAction.UPDATE_KEY_PERSONNEL, `Tentativo di Admin di cambiare password per utente AuthID ${personnelAuthUserIdToUpdate} - operazione da effettuare con privilegi elevati (service_role) non disponibili client-side.`);
+           // To make this work, you'd call a Supabase Edge Function.
+           return { success: false, message: "La modifica della password di altri utenti da parte dell'admin richiede un'operazione server-side con privilegi elevati." };
         } else {
             addAuditLogEntry(LogAction.UPDATE_KEY_PERSONNEL, `Tentativo non autorizzato di cambio password per utente AuthID ${personnelAuthUserIdToUpdate}.`);
             return { success: false, message: "Non autorizzato a cambiare password per questo utente."};
@@ -426,7 +452,26 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     if (profileUpdated || passwordUpdatedSuccessfully) {
         addAuditLogEntry(LogAction.UPDATE_KEY_PERSONNEL, `Personale chiave aggiornato (AuthID: ${personnelAuthUserIdToUpdate}): Profilo: ${profileUpdated}, Password: ${passwordUpdatedSuccessfully}`);
-        fetchKeyPersonnelList();
+        fetchKeyPersonnelList(); // Refresh the list in UI
+        // If the updated user is the current user, refresh their profile
+        if (currentKeyPersonnel?.auth_user_id === personnelAuthUserIdToUpdate) {
+            const { data: updatedProfile, error: fetchError } = await supabase
+                .from('key_personnel')
+                .select('id, auth_user_id, name, roles')
+                .eq('auth_user_id', personnelAuthUserIdToUpdate)
+                .single();
+            if (updatedProfile && !fetchError) {
+                 const kpProfile: KeyPersonnel = {
+                    id: updatedProfile.id,
+                    auth_user_id: updatedProfile.auth_user_id,
+                    name: updatedProfile.name,
+                    email: currentKeyPersonnel.email, // email doesn't change here
+                    roles: Array.isArray(updatedProfile.roles) ? updatedProfile.roles as KeyPersonnelRole[] : [],
+                };
+                setCurrentKeyPersonnel(kpProfile);
+                setIsAdminAuthenticated(kpProfile.roles.includes(KeyPersonnelRole.ADMIN));
+            }
+        }
         return { success: true, message: "Personale chiave aggiornato con successo." };
     }
 
@@ -461,14 +506,166 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
         return undefined;
     };
-    const addEmployee = async (): Promise<{ success: boolean, message?: string }> => { /* Stub from prompt */ return { success: false }; };
+    
+    const addEmployee = async (employeeData: Omit<Employee, 'id' | 'sede_id' | 'year' | 'roleHistory'> & { initialRole: string; initialRoleStartDate: string }): Promise<{ success: boolean, message?: string }> => {
+        if (!supabase || !isSupabaseConfigured) return { success: false, message: "Supabase client non disponibile." };
+        if (!currentSedeId || !currentYear) return { success: false, message: "Sede o Anno non selezionati." };
+        if (!currentKeyPersonnel || !(currentKeyPersonnel.roles.includes(KeyPersonnelRole.ADMIN) || currentKeyPersonnel.roles.includes(KeyPersonnelRole.QA_SITO))) {
+            addAuditLogEntry(LogAction.ADD_EMPLOYEE, `Tentativo fallito (non autorizzato) da ${currentKeyPersonnel?.name || 'utente sconosciuto'} per ${employeeData.name}`);
+            return { success: false, message: "Azione non autorizzata." };
+        }
+
+        const sedeName = sedi.find(s => s.id === currentSedeId)?.name || currentSedeId;
+        const newEmployeePayload = {
+            name: employeeData.name,
+            currentRole: employeeData.initialRole,
+            sede_id: currentSedeId,
+            year: currentYear,
+        };
+
+        const { data: newEmployee, error } = await supabase
+            .from('employees')
+            .insert(newEmployeePayload)
+            .select()
+            .single();
+
+        if (error || !newEmployee) {
+            console.error('[DataContext] Error adding employee:', error?.message);
+            addAuditLogEntry(LogAction.ADD_EMPLOYEE, `Errore aggiunta dipendente ${employeeData.name} per ${sedeName}/${currentYear}: ${error?.message}`);
+            return { success: false, message: error?.message || "Errore sconosciuto nell'aggiunta dipendente." };
+        }
+        
+        // Add initial role to role_history
+        const initialRoleEntry: Omit<RoleEntry, 'id'> & { employee_id: string } = {
+            employee_id: newEmployee.id,
+            role: employeeData.initialRole,
+            startDate: employeeData.initialRoleStartDate,
+            endDate: null,
+        };
+        const { error: roleHistoryError } = await supabase.from('role_history').insert(initialRoleEntry);
+        if (roleHistoryError) {
+             console.error('[DataContext] Error adding initial role history:', roleHistoryError?.message);
+             addAuditLogEntry(LogAction.ADD_EMPLOYEE, `Dipendente ${employeeData.name} aggiunto, ma errore storico ruolo: ${roleHistoryError?.message}`);
+             // Consider if employee should be deleted if role history fails
+        }
+
+        const completeNewEmployee: Employee = {
+            ...newEmployee,
+            roleHistory: roleHistoryError ? [] : [{...initialRoleEntry}] // Simplified, might need to re-fetch
+        };
+
+        setYearlySedeData(prevYSD => {
+            const updatedYearData = { ...(prevYSD[currentYear!] || {}) };
+            const updatedSedeData = { ...(updatedYearData[sedeName] || getInitialSedeSpecificData()) };
+            updatedSedeData.employees = [...updatedSedeData.employees, completeNewEmployee];
+            updatedYearData[sedeName] = updatedSedeData;
+            return { ...prevYSD, [currentYear!]: updatedYearData };
+        });
+
+        addAuditLogEntry(LogAction.ADD_EMPLOYEE, `Aggiunto dipendente: ${employeeData.name} (Ruolo: ${employeeData.initialRole}) per ${sedeName}/${currentYear}`);
+        return { success: true };
+    };
+
     const updateEmployeeRole = async (): Promise<{ success: boolean, message?: string }> => { /* Stub from prompt */ return { success: false }; };
     const deleteEmployee = async (): Promise<{ success: boolean, message?: string }> => { /* Stub from prompt */ return { success: false }; };
-    const addCourse = async (): Promise<{ success: boolean, message?: string, newCourse?: TrainingCourse }> => { /* Stub from prompt */ return { success: false }; };
+    
+    const addCourse = async (courseData: Omit<TrainingCourse, 'id' | 'sede_id' | 'year' | 'status' | 'approvals'>): Promise<{ success: boolean, message?: string, newCourse?: TrainingCourse }> => {
+        if (!supabase || !isSupabaseConfigured) return { success: false, message: "Supabase client non disponibile." };
+        if (!currentSedeId || !currentYear) return { success: false, message: "Sede o Anno non selezionati." };
+        if (!currentKeyPersonnel || !(currentKeyPersonnel.roles.includes(KeyPersonnelRole.ADMIN) || currentKeyPersonnel.roles.includes(KeyPersonnelRole.QA_SITO))) {
+            addAuditLogEntry(LogAction.ADD_COURSE, `Tentativo fallito (non autorizzato) da ${currentKeyPersonnel?.name || 'utente sconosciuto'} per ${courseData.name}`);
+            return { success: false, message: "Azione non autorizzata." };
+        }
+        const planRecord = getSedePlanRecord();
+        if (!planRecord) {
+            addAuditLogEntry(LogAction.ADD_COURSE, `Tentativo fallito: Piano Formativo non esistente per ${currentSedeId}/${currentYear} per corso ${courseData.name}`);
+            return { success: false, message: "Piano Formativo Annuale non trovato. Creane uno prima di aggiungere corsi." };
+        }
+
+        const sedeName = sedi.find(s => s.id === currentSedeId)?.name || currentSedeId;
+        const newCoursePayload = {
+            ...courseData,
+            sede_id: currentSedeId,
+            year: currentYear,
+            status: TrainingCourseStatus.BOZZA,
+            created_by_user_id: currentAuthUser?.id || null // Assuming your table has this
+        };
+
+        const { data: newCourse, error } = await supabase
+            .from('courses')
+            .insert(newCoursePayload)
+            .select('*, course_approvals(*)') // Ensure approvals (even if empty) are part of the select for consistency
+            .single();
+
+        if (error || !newCourse) {
+            console.error('[DataContext] Error adding course:', error?.message);
+            addAuditLogEntry(LogAction.ADD_COURSE, `Errore aggiunta corso ${courseData.name} per ${sedeName}/${currentYear}: ${error?.message}`);
+            return { success: false, message: error?.message || "Errore sconosciuto nell'aggiunta corso." };
+        }
+        
+        const completeNewCourse: TrainingCourse = {
+            ...newCourse,
+            approvals: newCourse.course_approvals || []
+        };
+
+        setYearlySedeData(prevYSD => {
+            const updatedYearData = { ...(prevYSD[currentYear!] || {}) };
+            const updatedSedeData = { ...(updatedYearData[sedeName] || getInitialSedeSpecificData()) };
+            updatedSedeData.courses = [...updatedSedeData.courses, completeNewCourse];
+            updatedYearData[sedeName] = updatedSedeData;
+            return { ...prevYSD, [currentYear!]: updatedYearData };
+        });
+
+        addAuditLogEntry(LogAction.ADD_COURSE, `Aggiunto corso: ${courseData.name} per ${sedeName}/${currentYear}`);
+        return { success: true, newCourse: completeNewCourse };
+    };
+
     const updateCourse = async (): Promise<{ success: boolean, message?: string }> => { /* Stub from prompt */ return { success: false }; };
     const deleteCourse = async (): Promise<{ success: boolean, message?: string }> => { /* Stub from prompt */ return { success: false }; };
     const approveCourseByQP = async (): Promise<{ success: boolean, message?: string }> => { /* Stub from prompt */ return { success: false }; };
-    const addAssignment = async (): Promise<{ success: boolean, message?: string }> => { /* Stub from prompt */ return { success: false }; };
+    
+    const addAssignment = async (assignmentData: Omit<TrainingAssignment, 'id' | 'sede_id' | 'year'>): Promise<{ success: boolean, message?: string }> => {
+        if (!supabase || !isSupabaseConfigured) return { success: false, message: "Supabase client non disponibile." };
+        if (!currentSedeId || !currentYear) return { success: false, message: "Sede o Anno non selezionati." };
+        if (!currentKeyPersonnel || !(currentKeyPersonnel.roles.includes(KeyPersonnelRole.ADMIN) || currentKeyPersonnel.roles.includes(KeyPersonnelRole.QA_SITO))) {
+            addAuditLogEntry(LogAction.ADD_ASSIGNMENT, `Tentativo fallito (non autorizzato) da ${currentKeyPersonnel?.name || 'utente sconosciuto'}`);
+            return { success: false, message: "Azione non autorizzata." };
+        }
+        
+        const employee = getEmployeeById(assignmentData.employee_id);
+        const course = getCourseById(assignmentData.course_id);
+        const sedeName = sedi.find(s => s.id === currentSedeId)?.name || currentSedeId;
+
+        const newAssignmentPayload = {
+            ...assignmentData,
+            sede_id: currentSedeId,
+            year: currentYear,
+        };
+
+        const { data: newAssignment, error } = await supabase
+            .from('assignments')
+            .insert(newAssignmentPayload)
+            .select()
+            .single();
+
+        if (error || !newAssignment) {
+            console.error('[DataContext] Error adding assignment:', error?.message);
+            addAuditLogEntry(LogAction.ADD_ASSIGNMENT, `Errore aggiunta assegnazione per Dip. ${employee?.name || assignmentData.employee_id} / Corso ${course?.name || assignmentData.course_id} per ${sedeName}/${currentYear}: ${error?.message}`);
+            return { success: false, message: error?.message || "Errore sconosciuto nell'aggiunta assegnazione." };
+        }
+
+        setYearlySedeData(prevYSD => {
+            const updatedYearData = { ...(prevYSD[currentYear!] || {}) };
+            const updatedSedeData = { ...(updatedYearData[sedeName] || getInitialSedeSpecificData()) };
+            updatedSedeData.assignments = [...updatedSedeData.assignments, newAssignment as TrainingAssignment];
+            updatedYearData[sedeName] = updatedSedeData;
+            return { ...prevYSD, [currentYear!]: updatedYearData };
+        });
+        
+        addAuditLogEntry(LogAction.ADD_ASSIGNMENT, `Aggiunta assegnazione per Dip. ${employee?.name || assignmentData.employee_id} / Corso ${course?.name || assignmentData.course_id} per ${sedeName}/${currentYear}`);
+        return { success: true };
+    };
+
     const updateAssignmentStatus = async (): Promise<{ success: boolean, message?: string }> => { /* Stub from prompt */ return { success: false }; };
     const addBatchAssignments = async (): Promise<{ success: boolean, message?: string, count?:number }> => { /* Stub from prompt */ return { success: false }; };
     const deleteAssignment = async (): Promise<{ success: boolean, message?: string }> => { /* Stub from prompt */ return { success: false }; };
@@ -502,7 +699,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     
     const createPlanRecord = async (sedeId: string, year: number): Promise<{ success: boolean, message?: string, newPlan?: PlanRecord }> => {
         if (!supabase || !isSupabaseConfigured) return { success: false, message: "Supabase client non disponibile." };
-        if (!currentKeyPersonnel || !(currentKeyPersonnel.role === KeyPersonnelRole.ADMIN || currentKeyPersonnel.role === KeyPersonnelRole.QA_SITO)) {
+        if (!currentKeyPersonnel || !(currentKeyPersonnel.roles.includes(KeyPersonnelRole.ADMIN) || currentKeyPersonnel.roles.includes(KeyPersonnelRole.QA_SITO))) {
             addAuditLogEntry(LogAction.CREATE_PLAN_RECORD, `Tentativo fallito (non autorizzato) per ${sedeId}/${year}`);
             return { success: false, message: "Azione non autorizzata." };
         }
@@ -512,13 +709,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         const sedeName = sedi.find(s => s.id === sedeId)?.name || sedeId;
 
-        // Check if a plan already exists (though UI should prevent this, good to double check)
-        const existingPlan = getSedePlanRecord(); // This checks the local cache
+        const existingPlan = getSedePlanRecord(); 
         if (existingPlan && existingPlan.sede_id === sedeId && existingPlan.year === year) {
              addAuditLogEntry(LogAction.CREATE_PLAN_RECORD, `Tentativo fallito (piano già esistente) per ${sedeName}/${year}`);
              return { success: false, message: `Un piano per ${sedeName}/${year} esiste già.` };
         }
-
 
         const { data, error } = await supabase
             .from('plan_records')
@@ -539,11 +734,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         if (data) {
             addAuditLogEntry(LogAction.CREATE_PLAN_RECORD, `Creato piano per ${sedeName}/${year} con ID: ${data.id}`);
-            // Manually update the local cache structure for the new plan
             const newPlanRecord: PlanRecord = {
                 ...data,
-                approvals: [], // New plan has no approvals yet
-                created_by_name: (data.created_by as any)?.name || currentKeyPersonnel.name, // Use current user's name as fallback
+                approvals: [], 
+                created_by_name: (data.created_by as any)?.name || currentKeyPersonnel.name, 
             };
             setYearlySedeData(prevYSD => {
                 const updatedYearData = { ...(prevYSD[year] || {}) };
@@ -552,8 +746,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 updatedYearData[sedeName] = updatedSedeData;
                 return { ...prevYSD, [year]: updatedYearData };
             });
-            // Optionally, call fetchDataForSedeAndYear to ensure full consistency if other related data might change
-            // await fetchDataForSedeAndYear(sedeId, year); 
             return { success: true, newPlan: newPlanRecord };
         }
         return { success: false, message: "Errore sconosciuto nella creazione del piano." };
@@ -568,39 +760,31 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const availableYears = (): number[] => {
         const years = new Set<number>();
         const systemYear = new Date().getFullYear();
-
-        // Add years from existing data in yearlySedeData
         Object.keys(yearlySedeData).forEach(yearStr => {
             if (!isNaN(parseInt(yearStr))) {
                 years.add(parseInt(yearStr));
             }
         });
-
-        // Add a range of years around the system year (e.g., 3 years past, current, 3 years future)
         for (let i = -3; i <= 3; i++) {
             years.add(systemYear + i);
         }
-
-        // Ensure currentYear from context is included if set
         if (currentYear !== null && !isNaN(currentYear)) {
             years.add(currentYear);
         }
-        
-        // Fallback if the set is somehow still empty
         if (years.size === 0) {
             years.add(systemYear);
         }
-        
-        return Array.from(years).sort((a, b) => b - a); // Sort descending
+        return Array.from(years).sort((a, b) => b - a);
     };
 
   const removeKeyPersonnel = async (personnelAuthUserId: string): Promise<{ success: boolean, message?: string }> => {
     if (!supabase || !isSupabaseConfigured) return { success: false, message: "Supabase client non disponibile." };
-    if (!currentKeyPersonnel || currentKeyPersonnel.role !== KeyPersonnelRole.ADMIN) {
+    if (!currentKeyPersonnel || !currentKeyPersonnel.roles.includes(KeyPersonnelRole.ADMIN)) {
       addAuditLogEntry(LogAction.REMOVE_KEY_PERSONNEL, `Tentativo fallito (non Admin) per AuthID ${personnelAuthUserId}`);
       return { success: false, message: "Azione non autorizzata." };
     }
 
+    // First, delete from key_personnel table
     const { error: profileError } = await supabase
       .from('key_personnel')
       .delete()
@@ -611,10 +795,23 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       addAuditLogEntry(LogAction.REMOVE_KEY_PERSONNEL, `Errore eliminazione profilo AuthID ${personnelAuthUserId}: ${profileError.message}`);
       return { success: false, message: `Errore profilo: ${profileError.message}` };
     }
-    console.warn(`[DataContext] Profile for AuthID ${personnelAuthUserId} deleted. Associated auth user might need manual deletion or a backend function call if not handled by triggers/policies.`);
-    addAuditLogEntry(LogAction.REMOVE_KEY_PERSONNEL, `Rimosso profilo utente chiave AuthID ${personnelAuthUserId}. L'utente Auth potrebbe richiedere rimozione separata.`);
+    
+    // Then, delete from auth.users (requires admin privileges for Supabase client, typically service_role)
+    // This operation might fail if the Supabase client is initialized with anon key.
+    // Consider using a Supabase Edge Function for this kind of admin operation.
+    // For now, we'll log a warning.
+    console.warn(`[DataContext] Profile for AuthID ${personnelAuthUserId} deleted. Attempting to delete auth user. This requires elevated Supabase client privileges (service_role) not typically available on the client-side.`);
+    // const { error: authUserError } = await supabase.auth.admin.deleteUser(personnelAuthUserId); // This line requires service_role
+    // if (authUserError) {
+    //   console.error('[DataContext] Error deleting auth user:', authUserError.message);
+    //   addAuditLogEntry(LogAction.REMOVE_KEY_PERSONNEL, `Profilo AuthID ${personnelAuthUserId} rimosso, ma errore eliminazione utente Auth: ${authUserError.message}. Azione manuale richiesta.`);
+    //   fetchKeyPersonnelList(); // Refresh list anyway
+    //   return { success: true, message: `Profilo personale chiave rimosso, ma l'utente Auth (${personnelAuthUserId}) potrebbe non essere stato eliminato. Controllare i log e Supabase.` };
+    // }
+
+    addAuditLogEntry(LogAction.REMOVE_KEY_PERSONNEL, `Rimosso profilo utente chiave AuthID ${personnelAuthUserId}. L'utente Auth potrebbe richiedere rimozione separata se l'operazione non è automatizzata o fallisce.`);
     fetchKeyPersonnelList(); // Refresh list
-    return { success: true, message: "Profilo personale chiave rimosso. L'utente Auth potrebbe necessitare di rimozione separata." };
+    return { success: true, message: "Profilo personale chiave rimosso. La rimozione dell'utente di autenticazione associato potrebbe richiedere un'azione manuale o una funzione server-side con privilegi elevati." };
   };
 
 
@@ -632,7 +829,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isAdminAuthenticated, currentKeyPersonnel,
         loginUser, logoutUser,
         keyPersonnelList, fetchKeyPersonnel: fetchKeyPersonnelList, addKeyPersonnel, updateKeyPersonnel, removeKeyPersonnel, getKeyPersonnelByAuthId,
-        createPlanRecord, // Added new function
+        createPlanRecord, 
         submitPlanForApproval, approveOrRejectPlanStep,
         addAuditLogEntry, downloadAuditLog,
         loadKeyPersonnelFromMasterCSV, exportDataToCSV,
